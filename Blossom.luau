@@ -29,7 +29,7 @@ local INTER = "rbxassetid://12187365364"
 local Vec2, Dim2 = Vector2.new, UDim2.new
 local Offset = UDim2.fromOffset
 local RGB = Color3.fromRGB
-local floor, round = math.floor, math.round
+local floor, round, abs = math.floor, math.round, math.abs
 local FULL = 99
 
 -- Spacing rule: Pad around every surface, Gap between stacked items. Sizes are even so centring stays on whole pixels.
@@ -198,6 +198,7 @@ local function place(target, prop, value, animated, preset)
 end
 
 local function stepAnimator(dt)
+	if #Active == 0 then return end
 	dt = math.min(dt, 1 / 20)
 	local cache = {}
 	local i = 1
@@ -230,7 +231,7 @@ local function stepAnimator(dt)
 				local nd = c[1] * d + c[2] * v[n]
 				x[n], v[n] = g[n] + nd, nv
 				local channelEps = (e.Kind == "UDim2" and n % 2 == 1) and 0.0005 or eps
-				if math.abs(nd) > channelEps or math.abs(nv) > velEps then settled = false end
+				if abs(nd) > channelEps or abs(nv) > velEps then settled = false end
 			end
 			if settled then
 				e.Target[e.Prop] = e.Goal
@@ -285,6 +286,7 @@ local function forget(inst)
 			end
 		end
 	end
+	for _, entry in Tracks[inst] or {} do entry.Dead = true end
 	Bound[inst], Dynamic[inst], Cased[inst], Tracks[inst], NoFade[inst] = nil, nil, nil, nil, nil
 end
 
@@ -977,10 +979,11 @@ local function attachColor(section, item, options)
 	addSlot(item, swatch, Metrics.Swatch, Metrics.Swatch, Metrics.Gap + 2)
 	color.Swatch = swatch
 	function color:Set(value, alpha, silent)
+		if type(alpha) == "boolean" then alpha, silent = nil, alpha end
 		color.Value = value
 		if alpha ~= nil then color.Alpha = alpha end
 		swatch.BackgroundColor3 = value
-		if win.Picker.Target == color and not win.Picker.Dragging then win.Picker.Sync() end
+		if win.ActivePopup == win.Picker and win.Picker.Target == color and not win.Picker.Dragging then win.Picker.Sync() end
 		if not silent then fire(color.Callback, value, color.Alpha) end
 	end
 	swatch.MouseButton1Click:Connect(function() win:OpenPicker(swatch, color) end)
@@ -1002,7 +1005,6 @@ end
 -- Every element joins configs automatically under Tab/Section/Name unless NoSave is set.
 local function register(section, object, options, item)
 	local win = section.Window
-	win.FlagOwners[item] = object
 	if options.NoSave then return nil end
 	local base = options.Flag or (section.Tab.Name .. "/" .. section.Name .. "/" .. tostring(options.Name or item.Kind))
 	local flag, count = base, 1
@@ -1069,7 +1071,6 @@ function Section:Toggle(options)
 	hit.MouseButton1Click:Connect(function() toggle:Set(not toggle.Value) end)
 
 	local hotkeyName = options.KeybindName or (name == "Enabled" and self.Name) or name
-	options.KeybindName = hotkeyName
 	toggle.Keybind, toggle.Color = addInlineControls(self, item, options, hotkeyName)
 	if toggle.Keybind then
 		toggle.Keybind.OnPress = function()
@@ -1176,9 +1177,9 @@ function Section:Slider(options)
 		place(fill, "Size", Dim2(0, pixels, 1, 0), animated, "Follow")
 	end
 
+	local scale = 10 ^ decimals
 	function slider:Set(value, silent, animated)
-		local step = 10 ^ -decimals
-		value = math.clamp(floor(value / step + 0.5) * step, minimum, maximum)
+		value = math.clamp(floor(value * scale + 0.5) / scale, minimum, maximum)
 		local changed = value ~= slider.Value
 		slider.Value = value
 		setText(chipText, formatNumber(value, decimals) .. suffix)
@@ -1223,7 +1224,9 @@ function Section:RangeSlider(options)
 	local track, fill, hit = makeTrack(item.Frame)
 	local lowKnob, highKnob = makeKnob(track), makeKnob(track)
 
-	local function alphaOf(value) return (value - minimum) / (maximum - minimum) end
+	local scale = 10 ^ decimals
+	local function snapped(value) return math.clamp(floor(value * scale + 0.5) / scale, minimum, maximum) end
+	local function alphaOf(value) return maximum == minimum and 0 or (value - minimum) / (maximum - minimum) end
 
 	local function render(animated)
 		local width = trackWidth(self.Window)
@@ -1235,16 +1238,13 @@ function Section:RangeSlider(options)
 	end
 
 	function range:Set(value, silent, animated)
-		range.Value = { math.min(value[1], value[2]), math.max(value[1], value[2]) }
+		local low, high = snapped(math.min(value[1], value[2])), snapped(math.max(value[1], value[2]))
+		local changed = low ~= range.Value[1] or high ~= range.Value[2]
+		range.Value = { low, high }
 		setText(lowText, formatNumber(range.Value[1], decimals) .. suffix)
 		setText(highText, formatNumber(range.Value[2], decimals) .. suffix)
 		render(animated ~= false)
-		if not silent then fire(range.Callback, range.Value) end
-	end
-
-	local function snapped(value)
-		local step = 10 ^ -decimals
-		return math.clamp(floor(value / step + 0.5) * step, minimum, maximum)
+		if changed and not silent then fire(range.Callback, range.Value) end
 	end
 
 	makeEditable(lowChip, lowText, function() return formatNumber(range.Value[1], decimals) end, function(number)
@@ -1271,7 +1271,8 @@ function Section:RangeSlider(options)
 		if not isClick(input) then return end
 		local point = mousePos()
 		local value = valueAt(point)
-		active = math.abs(value - range.Value[1]) <= math.abs(value - range.Value[2]) and 1 or 2
+		local low, high = range.Value[1], range.Value[2]
+		active = (low == high and value >= low or low ~= high and abs(value - low) > abs(value - high)) and 2 or 1
 		fromMouse(point)
 		beginDrag(fromMouse)
 	end)
@@ -2311,7 +2312,7 @@ function Window:_buildSearch()
 	local modal = new("TextButton", {
 		Bg = "Background", Position = self:_modalPosition(0), Size = Offset(width, height), Radius = Metrics.WindowRadius, Border = "Outline",
 	}, overlay)
-	local title = label(modal, { Text = "Search", TextSize = 14, Weight = Enum.FontWeight.SemiBold, X = pad * 2, Y = pad + 2, RowH = 20 })
+	local title = label(modal, { Text = "Search", TextSize = 14, Weight = Enum.FontWeight.SemiBold, X = pad * 2, Y = pad + 2, RowH = 20, Truncate = Enum.TextTruncate.AtEnd })
 	local field = new("Frame", { Bg = "Inline", Position = Offset(pad * 2 + 1, 43), Size = Offset(width - pad * 4 - 2, 34), Radius = Metrics.PillRadius, Border = "Outline" }, modal)
 	makeIcon(field, "search", 14, "InactiveText", "Inline", { Position = Offset(10, 10) })
 	local box = new("TextBox", {
@@ -2502,24 +2503,28 @@ function Window:_serialize()
 end
 
 function Window:_deserialize(json)
-	local data = HttpService:JSONDecode(json)
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, json)
+	if not ok or type(data) ~= "table" then return false end
 	for flag, value in data do
 		local object = self.Flags[flag]
 		if object then
-			if object.Swatch then
-				object:Set(Color3.fromHex(value.Color), value.Alpha)
-			elseif object.Chip then
-				object.Mode = value.Mode or object.Mode
-				local key = nil
-				if value.Key then
-					key = string.find(value.Key, "MouseButton", 1, true) and Enum.UserInputType[value.Key] or Enum.KeyCode[value.Key]
+			pcall(function()
+				if object.Swatch then
+					object:Set(Color3.fromHex(value.Color), value.Alpha)
+				elseif object.Chip then
+					object.Mode = value.Mode or object.Mode
+					local key = nil
+					if value.Key then
+						key = string.find(value.Key, "MouseButton", 1, true) and Enum.UserInputType[value.Key] or Enum.KeyCode[value.Key]
+					end
+					object:Set(key)
+				else
+					object:Set(value)
 				end
-				object:Set(key)
-			else
-				object:Set(value)
-			end
+			end)
 		end
 	end
+	return true
 end
 
 function Window:ListConfigs()
@@ -2553,7 +2558,7 @@ function Window:LoadConfig(name)
 	else
 		json = ConfigMemory[name]
 	end
-	if json then self:_deserialize(json); return true end
+	if json then return self:_deserialize(json) end
 	return false
 end
 
@@ -2600,18 +2605,20 @@ function Window:BuildSettings(tab)
 		autoloadList:SetOptions(names)
 	end
 	profiles:Button({ Name = "Create", Callback = function()
-		local name = nameBox.Instance.Text
+		local name = string.gsub(nameBox.Instance.Text, '[\\/:*?"<>|]', ""):match("^%s*(.-)%s*$")
 		if name == "" then self:Notify({ Text = "Enter a config name first." }); return end
 		self:SaveConfig(name)
 		refreshList()
 		self:Notify(('Created "%s".'):format(name))
 	end })
 	profiles:Button({ Name = "Load", Callback = function()
-		if selected and self:LoadConfig(selected) then self:Notify(('Loaded "%s".'):format(selected)) end
+		if not selected then return end
+		self:Notify((self:LoadConfig(selected) and 'Loaded "%s".' or 'Could not load "%s".'):format(selected))
 	end })
 	profiles:Button({ Name = "Delete", Callback = function()
 		if selected then
 			self:DeleteConfig(selected)
+			if selected == autoloadName then autoloadName = nil; autoloadList:Set(nil, true); writeAutoload(nil) end
 			self:Notify(('Deleted "%s".'):format(selected))
 			selected = nil
 			refreshList()
@@ -2637,7 +2644,7 @@ function Window:BuildSettings(tab)
 
 	local theming = tab:Section({ Name = "Theming", Icon = "cube", Side = 2 })
 	theming:Dropdown({ Name = "Theme", Options = ThemeOrder, Default = self.ThemeName, MaxRows = 11, NoSave = true, Callback = function(value) self:ApplyTheme(value) end })
-	theming:Dropdown({ Name = "Casing", Options = Casings, Default = "Normal", NoSave = true, Callback = function(value) self:SetCasing(value) end })
+	theming:Dropdown({ Name = "Casing", Options = Casings, Default = Casing, NoSave = true, Callback = function(value) self:SetCasing(value) end })
 	theming:Divider()
 	for _, pair in ThemeKeys do
 		local key = pair[2]
@@ -2650,7 +2657,9 @@ function Window:BuildSettings(tab)
 	menuBind.OnKeyChanged = function() self.MenuKey = menuBind.Key end
 	menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Callback = function(value) self.Watermark.Visible = value end })
 	menu:Toggle({ Name = "Hotkey List", Default = true, NoSave = true, Callback = function(value) self.Hotkeys.Visible = value end })
-	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = "Inter", NoSave = true, Callback = function(value) self:SetFont(value) end })
+	local fontName = "Inter"
+	for name, family in Fonts do if family == FontFamily then fontName = name end end
+	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, NoSave = true, Callback = function(value) self:SetFont(value) end })
 	menu:Dropdown({ Name = "Text Weight", Options = WeightOrder, Default = BodyWeight.Name, NoSave = true, Callback = function(value) self:SetTextWeight(value) end })
 
 	if saved then
@@ -2760,7 +2769,7 @@ function Blossom.new(options)
 		Width = startW, Height = startH, MinSize = minSize, ColumnW = (startW - Metrics.ContentX - Metrics.Pad * 3) / 2,
 		ResizeJobs = {}, ResizeHandles = {},
 		Title = options.Title or "Blossom", Tabs = {}, Sections = {}, Columns = {}, Index = {}, Binds = {}, Colors = {}, Flags = {},
-		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Jobs = {}, Moved = {}, PendingThemeKeys = {}, FlagOwners = {},
+		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		Visible = true, ThemeName = options.Theme or "Blossom", MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0,
@@ -2797,7 +2806,7 @@ function Blossom.new(options)
 	interactive(searchButton, "Inline")
 	win.SearchButton = searchButton
 	makeIcon(searchButton, "search", 14, "InactiveText", "Inline", { Position = Offset(6, 6) })
-	win.SearchLabel = label(searchButton, { Fg = "InactiveText", Text = "Search...", X = 30, RowH = Metrics.SearchH - 2, Right = 6 })
+	win.SearchLabel = label(searchButton, { Fg = "InactiveText", Text = "Search...", X = 30, RowH = Metrics.SearchH - 2, Right = 6, Truncate = Enum.TextTruncate.AtEnd })
 	searchButton.MouseButton1Click:Connect(function() win:OpenSearch() end)
 
 	new("Frame", { Bg = "Outline", Position = Offset(Metrics.SidebarW, 0), Size = Dim2(0, 1, 1, 0) }, root)
@@ -2861,10 +2870,10 @@ function Blossom.new(options)
 			return
 		end
 		if processed then return end
-		if input.KeyCode == win.MenuKey then win:Toggle() end
+		if input.KeyCode == win.MenuKey or input.UserInputType == win.MenuKey then win:Toggle() end
 		for _, object in win.Binds do
 			if object.Key and (object.Key == input.KeyCode or object.Key == input.UserInputType) and object.OnPress then
-				object.OnPress()
+				fire(object.OnPress)
 			end
 		end
 	end))
@@ -2872,7 +2881,7 @@ function Blossom.new(options)
 	table.insert(win.Connections, UserInputService.InputEnded:Connect(function(input)
 		for _, object in win.Binds do
 			if object.Key and (object.Key == input.KeyCode or object.Key == input.UserInputType) and object.OnRelease then
-				object.OnRelease()
+				fire(object.OnRelease)
 			end
 		end
 	end))
@@ -2930,7 +2939,6 @@ function Blossom.new(options)
 		end
 	end
 	Jobs[perFrame] = true
-	table.insert(win.Jobs, perFrame)
 
 	holder.Visible, win.Visible = false, false
 	win.Watermark.Visible, win.Hotkeys.Visible = false, false

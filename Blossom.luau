@@ -16,6 +16,11 @@
 	Toggle and Label also accept Keybind = and Color = for inline controls.
 	Every element returns an object with .Value and :Set(value, silent).
 
+	Sub-tabs:   local Players = Tab:SubTab({ Name = "Players" }); Players:Section({ Name = "ESP", Side = 1 })
+	Gear:       local t = Section:Toggle({ Name = "Enabled", Gear = true }); t.Gear:Slider({ Name = "Hit Chance", ... })
+	Obsidian style: Window:AddTab, Tab:AddGroupbox, Groupbox:AddToggle("Index", { Text = ... }), Window.Toggles / Window.Options
+	            (also Blossom.Toggles / Blossom.Options), object:OnChanged(fn), object:SetValue(v), Window:OnUnload(fn).
+
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
 	Size and MinSize (Vector2), Resizable (default true). Window:SetSize(width, height) resizes from code.
 ]]
@@ -773,6 +778,8 @@ end
 
 local Window, Tab, Section, Column = {}, {}, {}, {}
 Window.__index, Tab.__index, Section.__index, Column.__index = Window, Tab, Section, Column
+local SubTab = {}
+SubTab.__index = SubTab
 
 local function formatNumber(value, decimals)
 	if decimals and decimals > 0 then return string.format("%." .. decimals .. "f", value) end
@@ -871,7 +878,7 @@ end
 
 function Column:ClampScroll()
 	-- Uses the window's own height so it's right on the same frame as a resize.
-	self.Target = math.clamp(self.Target, 0, math.max(0, self.ContentH - (self.Tab.Window.Height - Metrics.Pad * 2)))
+	self.Target = math.clamp(self.Target, 0, math.max(0, self.ContentH - (self.Tab.Window.Height - Metrics.Pad * 2 - (self.Tab.TopH or 0))))
 end
 
 function Column:ScrollTo(y)
@@ -991,20 +998,72 @@ local function attachColor(section, item, options)
 	return color
 end
 
+-- A gear icon on a Toggle or Label opens a popup that takes the same elements as a Section.
+local Gear = setmetatable({}, { __index = Section })
+Gear.__index = Gear
+
+function Gear:Layout()
+	local y = Metrics.Pad
+	for _, item in self.Items do
+		item.Y = y
+		item.Frame.Position = Offset(0, y)
+		y += item.Height + Metrics.Gap
+	end
+	local height = #self.Items > 0 and y - Metrics.Gap + Metrics.Pad or Metrics.Pad * 2
+	self.Popup.Frame.Size = Offset(self.Window.ColumnW, height)
+end
+
+function Gear:_item(height, kind, name)
+	local frame = new("Frame", { Size = Dim2(1, 0, 0, height) }, self.Body)
+	local item = { Frame = frame, Height = height, Kind = kind, Name = name, Section = self, Slots = {}, Visible = true, Y = 0 }
+	table.insert(self.Items, item)
+	table.insert(self.Controls, frame)
+	self:Layout()
+	return item
+end
+
+local function attachGear(section, item, name)
+	local win = section.Window
+	local frame, body, controls = win:_popupFrame(win.ColumnW, Metrics.Pad * 2)
+	local popup = { Frame = frame, Fader = newFader(frame) }
+	local gear = setmetatable({
+		Window = win, Tab = section.Tab, Name = section.Name .. "/" .. tostring(name), Popup = popup, Items = {}, Controls = controls,
+		Body = new("Frame", { Position = Offset(Metrics.Pad, 0), Size = Dim2(1, -Metrics.Pad * 2, 1, 0) }, body),
+	}, Gear)
+	table.insert(win.ResizeJobs, function() gear:Layout() end)
+	local button = new("TextButton", { Size = Offset(Metrics.Row, Metrics.Row) }, item.Frame)
+	local hovering = false
+	local icon = makeIcon(button, "gear", 14, function() return hovering and Current.Text or Current.InactiveText end, section.Popup and "Background" or "Inline", { Position = Offset(1, 1) })
+	addSlot(item, button, Metrics.Row, Metrics.Row, Metrics.Gap + 2)
+	hoverable(button, function() hovering = true; icon.Update() end, function() hovering = false; icon.Update() end)
+	button.MouseButton1Click:Connect(function()
+		local p, s = button.AbsolutePosition, button.AbsoluteSize
+		win:_openPopup(popup, button, Vec2(p.X - 8, p.Y + s.Y + Metrics.Pad))
+	end)
+	return gear
+end
+
 local function addInlineControls(section, item, options, name)
-	local keybind, color
+	local keybind, color, gear
 	if options.Color then
 		color = attachColor(section, item, { Default = options.Color, Alpha = options.ColorAlpha, Callback = options.ColorCallback })
 	end
 	if options.Keybind ~= nil then
 		keybind = attachKeybind(section, item, { Key = options.Keybind, Mode = options.KeybindMode, Name = options.KeybindName or name })
 	end
-	return keybind, color
+	if options.Gear then gear = attachGear(section, item, options.Name or name) end
+	return keybind, color, gear
 end
 
 -- Every element joins configs automatically under Tab/Section/Name unless NoSave is set.
 local function register(section, object, options, item)
 	local win = section.Window
+	function object:SetValue(...) return self:Set(...) end
+	function object:OnChanged(callback)
+		local key = self.Chip and "OnKeyChanged" or "Callback"
+		local previous = self[key]
+		self[key] = previous and function(...) previous(...); fire(callback, ...) end or callback
+	end
 	if options.NoSave then return nil end
 	local base = options.Flag or (section.Tab.Name .. "/" .. section.Name .. "/" .. tostring(options.Name or item.Kind))
 	local flag, count = base, 1
@@ -1013,6 +1072,8 @@ local function register(section, object, options, item)
 		flag = base .. "#" .. count
 	end
 	win.Flags[flag] = object
+	local registry = item.Kind == "Toggle" and win.Toggles or win.Options
+	registry[flag] = object
 	object.Flag = flag
 	return flag
 end
@@ -1071,7 +1132,7 @@ function Section:Toggle(options)
 	hit.MouseButton1Click:Connect(function() toggle:Set(not toggle.Value) end)
 
 	local hotkeyName = options.KeybindName or (name == "Enabled" and self.Name) or name
-	toggle.Keybind, toggle.Color = addInlineControls(self, item, options, hotkeyName)
+	toggle.Keybind, toggle.Color, toggle.Gear = addInlineControls(self, item, options, hotkeyName)
 	if toggle.Keybind then
 		toggle.Keybind.OnPress = function()
 			if toggle.Keybind.Mode == "Hold" then toggle:Set(true) else toggle:Set(not toggle.Value) end
@@ -1096,7 +1157,7 @@ function Section:Label(options)
 	item.Label = text
 	local object = { Item = item, Instance = text }
 	function object:Set(value) setText(text, value) end
-	object.Keybind, object.Color = addInlineControls(self, item, options, name)
+	object.Keybind, object.Color, object.Gear = addInlineControls(self, item, options, name)
 	return object
 end
 
@@ -1454,7 +1515,9 @@ local function buildDropdown(win, parent, options)
 	function dropdown:Set(newValue, silent)
 		if dropdown.Multi then
 			dropdown.Value = {}
-			for _, option in newValue do dropdown.Value[option] = true end
+			for key, option in newValue do
+				if option then dropdown.Value[type(key) == "string" and key or option] = true end
+			end
 		else
 			dropdown.Value = newValue
 		end
@@ -1695,6 +1758,7 @@ end
 -------------------------------------------------------------------------------
 
 function Tab:Section(options)
+	assert(not self.Subs, "This tab has sub-tabs: create its sections with SubTab:Section.")
 	local win = self.Window
 	local column = self.Columns[options.Side or 1]
 	local headerH = options.Description and Metrics.HeaderDescH or Metrics.HeaderH
@@ -1725,6 +1789,80 @@ function Tab:Section(options)
 	header.MouseButton1Down:Connect(function() section:_beginDrag() end)
 	section:Layout(false)
 	return section
+end
+
+local SUB_BAR, SUB_H = 24, 32
+
+local function buildColumns(win, owner, parent)
+	owner.Columns = {}
+	for index = 1, 2 do
+		local scroll = new("ScrollingFrame", {
+			Position = Offset(Metrics.Pad + (index - 1) * (win.ColumnW + Metrics.Pad), 0),
+			Size = Dim2(0, win.ColumnW, 1, 0), ScrollBarThickness = 0, CanvasSize = Offset(0, 0),
+			ScrollingEnabled = not UserInputService.MouseEnabled, ClipsDescendants = true,
+		}, parent)
+		local column = setmetatable({ Scroll = scroll, Sections = {}, Target = 0, ContentH = 0, Tab = owner, Index = index, ShowTop = false, ShowBottom = false }, Column)
+		local function edge(position, rotation)
+			local frame = new("Frame", { Bg = "Tab", BackgroundTransparency = 1, Position = position, Size = Offset(win.ColumnW, 14), ZIndex = 4 }, parent)
+			new("UIGradient", { Rotation = rotation, Transparency = NumberSequence.new(1, 0) }, frame)
+			return frame
+		end
+		local edgeX = Metrics.Pad + (index - 1) * (win.ColumnW + Metrics.Pad)
+		column.FadeTop, column.FadeBottom = edge(Offset(edgeX, 0), 270), edge(Dim2(0, edgeX, 1, -14), 90)
+		table.insert(win.Columns, column)
+		owner.Columns[index] = column
+	end
+end
+
+SubTab.Section = Tab.Section
+
+-- Sub-tabs split one tab into pages, each with its own sections: Tab:SubTab({ Name = "Players" }):Section({ ... })
+function Tab:SubTab(options)
+	local win = self.Window
+	if not self.Subs then
+		self.Subs, self.BarX = {}, 0
+		for _, column in self.Columns do column.Scroll.Visible = false end
+		self.Bar = new("Frame", { Name = "SubTabs", Position = Offset(Metrics.Pad, 0), Size = Dim2(1, -Metrics.Pad * 2, 0, SUB_BAR) }, self.Page)
+		self.Pill = new("Frame", { Bg = "Accent", Size = Offset(0, SUB_BAR - 2), Radius = Metrics.Radius, Border = "Outline", Visible = false }, self.Bar)
+		addGradient(self.Pill)
+	end
+	local sub = setmetatable({ Window = win, Parent = self, Name = self.Name .. "/" .. options.Name, TopH = SUB_H }, SubTab)
+	sub.Page = new("Frame", { Name = options.Name, Position = Offset(0, SUB_H), Size = Dim2(1, 0, 1, -SUB_H), Visible = false }, self.Page)
+	buildColumns(win, sub, sub.Page)
+	local width = math.max(60, #options.Name * 7 + 24)
+	sub.X, sub.W = self.BarX, width
+	self.BarX += width + Metrics.Gap
+	sub.Button = new("TextButton", { Position = Offset(sub.X, 0), Size = Offset(width, SUB_BAR), ZIndex = 2 }, self.Bar)
+	local hovering = false
+	sub.Label = centeredLabel(sub.Button, width, {
+		Text = options.Name, RowH = SUB_BAR,
+		Fg = function() return (self.Sub == sub or hovering) and Current.Text or Current.InactiveText end,
+	})
+	hoverable(sub.Button, function() hovering = true; refresh(sub.Label) end, function() hovering = false; refresh(sub.Label) end)
+	sub.Button.MouseButton1Click:Connect(function() self:SelectSub(sub) end)
+	table.insert(self.Subs, sub)
+	if not self.Sub then self:SelectSub(sub, true) end
+	return sub
+end
+
+function Tab:SelectSub(sub, instant)
+	if self.Sub == sub then return end
+	local previous = self.Sub
+	self.Sub = sub
+	self.Window:CloseFloating()
+	if previous then
+		previous.Page.Visible = false
+		refresh(previous.Label)
+	end
+	sub.Page.Visible = true
+	refresh(sub.Label)
+	self.Pill.Visible = true
+	place(self.Pill, "Position", Offset(sub.X + 1, 1), not instant, "Knob")
+	place(self.Pill, "Size", Offset(sub.W - 2, SUB_BAR - 2), not instant, "Knob")
+	if not instant then
+		sub.Page.Position = Offset(0, SUB_H + 10)
+		animate(sub.Page, "Position", Offset(0, SUB_H), "Soft")
+	end
 end
 
 -------------------------------------------------------------------------------
@@ -1768,24 +1906,7 @@ function Window:Tab(options)
 	tab.LabelY = tab.Label.Position.Y.Offset
 
 	tab.Page = new("Frame", { Name = options.Name, Size = Dim2(1, 0, 1, 0), Visible = false }, self.Pages)
-	tab.Columns = {}
-	for index = 1, 2 do
-		local scroll = new("ScrollingFrame", {
-			Position = Offset(Metrics.Pad + (index - 1) * (self.ColumnW + Metrics.Pad), 0),
-			Size = Dim2(0, self.ColumnW, 1, 0), ScrollBarThickness = 0, CanvasSize = Offset(0, 0),
-			ScrollingEnabled = not UserInputService.MouseEnabled, ClipsDescendants = true,
-		}, tab.Page)
-		local column = setmetatable({ Scroll = scroll, Sections = {}, Target = 0, ContentH = 0, Tab = tab, ShowTop = false, ShowBottom = false }, Column)
-		local function edge(position, rotation)
-			local frame = new("Frame", { Bg = "Tab", BackgroundTransparency = 1, Position = position, Size = Offset(self.ColumnW, 14), ZIndex = 4 }, tab.Page)
-			new("UIGradient", { Rotation = rotation, Transparency = NumberSequence.new(1, 0) }, frame)
-			return frame
-		end
-		local edgeX = Metrics.Pad + (index - 1) * (self.ColumnW + Metrics.Pad)
-		column.FadeTop, column.FadeBottom = edge(Offset(edgeX, 0), 270), edge(Dim2(0, edgeX, 1, -14), 90)
-		table.insert(self.Columns, column)
-		tab.Columns[index] = column
-	end
+	buildColumns(self, tab, tab.Page)
 
 	local function paint()
 		tab.Icon.Update()
@@ -1800,7 +1921,15 @@ function Window:Tab(options)
 	return tab
 end
 
+function Window:Cols()
+	local tab = self.CurrentTab
+	return (tab.Sub or tab).Columns
+end
+
 function Window:SelectTab(tab, instant)
+	local sub
+	if tab.Parent then sub, tab = tab, tab.Parent end
+	if sub then tab:SelectSub(sub, instant) end
 	if self.CurrentTab == tab then return end
 	local previous = self.CurrentTab
 	self.CurrentTab = tab
@@ -1856,6 +1985,10 @@ end
 
 function Window:Notify(options)
 	if type(options) == "string" then options = { Text = options } end
+	options = {
+		Text = options.Text or (options.Title and options.Description and options.Title .. ": " .. options.Description) or options.Description or options.Title,
+		Icon = options.Icon, Duration = options.Duration or options.Time,
+	}
 	local frame = new("Frame", { Bg = "Background", Size = Offset(60, 28), Radius = Metrics.FloatRadius, Border = "Outline", Visible = false }, self.Notifications)
 	makeIcon(frame, options.Icon or "check", 14, function() return RGB(112, 205, 132) end, "Background", { Position = Offset(8, 7) })
 	local text = label(frame, { Text = options.Text, TextSize = 12, X = 28, RowH = 28, W = 340, Truncate = Enum.TextTruncate.AtEnd })
@@ -2019,17 +2152,15 @@ function Window:_applySize(width, height)
 	self.Width, self.Height = width, height
 	self.ColumnW = (width - Metrics.ContentX - Metrics.Pad * 3) / 2
 	self.Holder.Size = Offset(width, height)
-	for _, tab in self.Tabs do
-		for index, column in tab.Columns do
-			local x = Metrics.Pad + (index - 1) * (self.ColumnW + Metrics.Pad)
-			column.Scroll.Position = Offset(x, 0)
-			column.Scroll.Size = Dim2(0, self.ColumnW, 1, 0)
-			column.FadeTop.Position, column.FadeTop.Size = Offset(x, 0), Offset(self.ColumnW, 14)
-			column.FadeBottom.Position, column.FadeBottom.Size = Dim2(0, x, 1, -14), Offset(self.ColumnW, 14)
-			column:ClampScroll()
-			if column.Scroll.CanvasPosition.Y > column.Target then
-				snap(column.Scroll, "CanvasPosition", Vec2(0, column.Target))
-			end
+	for _, column in self.Columns do
+		local x = Metrics.Pad + (column.Index - 1) * (self.ColumnW + Metrics.Pad)
+		column.Scroll.Position = Offset(x, 0)
+		column.Scroll.Size = Dim2(0, self.ColumnW, 1, 0)
+		column.FadeTop.Position, column.FadeTop.Size = Offset(x, 0), Offset(self.ColumnW, 14)
+		column.FadeBottom.Position, column.FadeBottom.Size = Dim2(0, x, 1, -14), Offset(self.ColumnW, 14)
+		column:ClampScroll()
+		if column.Scroll.CanvasPosition.Y > column.Target then
+			snap(column.Scroll, "CanvasPosition", Vec2(0, column.Target))
 		end
 	end
 	for _, job in self.ResizeJobs do job() end
@@ -2113,7 +2244,10 @@ function Window:_overControl(point)
 		if inside(tab.Button, point) then return true end
 	end
 	if self.CurrentTab then
-		for _, column in self.CurrentTab.Columns do
+		for _, sub in self.CurrentTab.Subs or {} do
+			if inside(sub.Button, point) then return true end
+		end
+		for _, column in self:Cols() do
 			if inside(column.Scroll, point) then
 				for _, section in column.Sections do
 					if inside(section.Root, point) then return true end
@@ -2181,6 +2315,8 @@ function Window:_buildKeybindMenu()
 	self.KeybindMenu = menu
 end
 
+local ColorClipboard
+
 function Window:_buildPicker()
 	local pad, gap = Metrics.Pad, Metrics.Gap
 	local width = 216
@@ -2188,7 +2324,8 @@ function Window:_buildPicker()
 	local alphaY = pad + svH + pad
 	local labelY = alphaY + barW + pad
 	local inputY = labelY + Metrics.Row + gap
-	local frame, body, controls = self:_popupFrame(width, inputY + Metrics.InputH + pad)
+	local copyY = inputY + Metrics.InputH + gap
+	local frame, body, controls = self:_popupFrame(width, copyY + Metrics.InputH + pad)
 	local picker = { Frame = frame, Fader = newFader(frame), Target = nil, H = 0, S = 0, V = 1, Alpha = 0, Dragging = false }
 
 	local sv = new("Frame", { BackgroundTransparency = 0, Position = Offset(pad + 1, pad + 1), Size = Offset(svW - 2, svH - 2), Radius = Metrics.Radius, Border = "Outline" }, body)
@@ -2240,6 +2377,34 @@ function Window:_buildPicker()
 	label(body, { Text = "Animations", X = pad, Y = labelY })
 	local holder = new("Frame", { Position = Offset(pad, inputY), Size = Offset(width - pad * 2, Metrics.InputH) }, body)
 	for _, control in { sv, hue, alphaBar, holder } do table.insert(controls, control) end
+
+	local half = (width - pad * 2 - gap) / 2
+	local function pickerButton(text, x, click)
+		local button = new("TextButton", { Position = Offset(x + 1, copyY + 1), Size = Offset(half - 2, Metrics.InputH - 2), Radius = Metrics.Radius, Border = "Outline", BackgroundTransparency = 0 }, body)
+		interactive(button, "Element", "HoveredElement", "Inline")
+		addGradient(button)
+		centeredLabel(button, half - 2, { Text = text, RowH = Metrics.InputH - 2 })
+		button.MouseButton1Click:Connect(click)
+		table.insert(controls, button)
+	end
+	pickerButton("Copy", pad, function()
+		local target = picker.Target
+		if not target then return end
+		ColorClipboard = { Value = target.Value, Alpha = target.Alpha }
+		if typeof(setclipboard) == "function" then pcall(setclipboard, "#" .. target.Value:ToHex()) end
+		self:Notify("Copied #" .. target.Value:ToHex())
+	end)
+	pickerButton("Paste", pad + half + gap, function()
+		local saved = ColorClipboard
+		if not saved and typeof(getclipboard) == "function" then
+			local ok, text = pcall(getclipboard)
+			local hex = ok and string.match(tostring(text), "#?(%x%x%x%x%x%x)")
+			if hex then saved = { Value = Color3.fromHex(hex), Alpha = 0 } end
+		end
+		if not saved or not picker.Target then return end
+		picker.Target:Set(saved.Value, saved.Alpha)
+		picker.Sync()
+	end)
 
 	local function paint()
 		local color = Color3.fromHSV(picker.H, picker.S, picker.V)
@@ -2378,10 +2543,10 @@ function Window:_buildSearch()
 				end
 			end
 			for _, section in self.Sections do
-				add(section, section.Name, section.Tab.Name .. " / " .. section.Name .. "  \u{00B7}  Section")
+				add(section, section.Name, (section.Tab.Name:gsub("/", " / ")) .. " / " .. section.Name .. "  \u{00B7}  Section")
 			end
 			for _, item in self.Index do
-				add(item, item.Name, item.Section.Tab.Name .. " / " .. item.Section.Name .. "  \u{00B7}  " .. item.Kind)
+				add(item, item.Name, (item.Section.Tab.Name:gsub("/", " / ")) .. " / " .. item.Section.Name .. "  \u{00B7}  " .. item.Kind)
 			end
 		end
 		for entry, row in search.Rows do
@@ -2569,6 +2734,75 @@ function Window:DeleteConfig(name)
 	ConfigMemory[name] = nil
 end
 
+local THEME_DIR = "Blossom/Themes"
+local ThemeMemory, UserThemes = {}, {}
+
+local function cleanName(text)
+	return (string.gsub(text, '[\\/:*?"<>|]', ""):match("^%s*(.-)%s*$"))
+end
+
+function Window:ListThemes()
+	local names = {}
+	if typeof(listfiles) == "function" and typeof(isfolder) == "function" and isfolder(THEME_DIR) then
+		for _, path in listfiles(THEME_DIR) do
+			local name = string.match(path, "([^/\\]+)%.json$")
+			if name then table.insert(names, name) end
+		end
+	else
+		for name in ThemeMemory do table.insert(names, name) end
+	end
+	table.sort(names)
+	return names
+end
+
+function Window:SaveTheme(name)
+	local data = {}
+	for key, color in Current do data[key] = color:ToHex() end
+	local json = HttpService:JSONEncode(data)
+	if typeof(writefile) == "function" then
+		if typeof(isfolder) == "function" then
+			if not isfolder("Blossom") then makefolder("Blossom") end
+			if not isfolder(THEME_DIR) then makefolder(THEME_DIR) end
+		end
+		writefile(THEME_DIR .. "/" .. name .. ".json", json)
+	else
+		ThemeMemory[name] = json
+	end
+	Themes[name], UserThemes[name], self.ThemeName = table.clone(Current), true, name
+	if not table.find(ThemeOrder, name) then table.insert(ThemeOrder, name) end
+end
+
+-- apply = false only registers the theme so it shows up in the Theme list.
+function Window:LoadTheme(name, apply)
+	local path, json = THEME_DIR .. "/" .. name .. ".json", nil
+	if typeof(readfile) == "function" and typeof(isfile) == "function" and isfile(path) then
+		json = readfile(path)
+	else
+		json = ThemeMemory[name]
+	end
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, json or "")
+	if not ok or type(data) ~= "table" then return false end
+	local theme = table.clone(Current)
+	for key, hex in data do
+		if theme[key] ~= nil then pcall(function() theme[key] = Color3.fromHex(hex) end) end
+	end
+	Themes[name], UserThemes[name] = theme, true
+	if not table.find(ThemeOrder, name) then table.insert(ThemeOrder, name) end
+	if apply ~= false then self:ApplyTheme(name, true) end
+	return true
+end
+
+function Window:DeleteTheme(name)
+	local path = THEME_DIR .. "/" .. name .. ".json"
+	if typeof(delfile) == "function" and typeof(isfile) == "function" and isfile(path) then delfile(path) end
+	ThemeMemory[name] = nil
+	if UserThemes[name] then
+		UserThemes[name], Themes[name] = nil, nil
+		local index = table.find(ThemeOrder, name)
+		if index then table.remove(ThemeOrder, index) end
+	end
+end
+
 local AUTOLOAD_PATH = "Blossom/autoload.txt"
 local AutoloadMemory
 
@@ -2605,7 +2839,7 @@ function Window:BuildSettings(tab)
 		autoloadList:SetOptions(names)
 	end
 	profiles:Button({ Name = "Create", Callback = function()
-		local name = string.gsub(nameBox.Instance.Text, '[\\/:*?"<>|]', ""):match("^%s*(.-)%s*$")
+		local name = cleanName(nameBox.Instance.Text)
 		if name == "" then self:Notify({ Text = "Enter a config name first." }); return end
 		self:SaveConfig(name)
 		refreshList()
@@ -2643,7 +2877,8 @@ function Window:BuildSettings(tab)
 	end })
 
 	local theming = tab:Section({ Name = "Theming", Icon = "cube", Side = 2 })
-	theming:Dropdown({ Name = "Theme", Options = ThemeOrder, Default = self.ThemeName, MaxRows = 11, NoSave = true, Callback = function(value) self:ApplyTheme(value) end })
+	for _, name in self:ListThemes() do self:LoadTheme(name, false) end
+	local themeDropdown = theming:Dropdown({ Name = "Theme", Options = ThemeOrder, Default = self.ThemeName, MaxRows = 11, NoSave = true, Callback = function(value) self:ApplyTheme(value) end })
 	theming:Dropdown({ Name = "Casing", Options = Casings, Default = Casing, NoSave = true, Callback = function(value) self:SetCasing(value) end })
 	theming:Divider()
 	for _, pair in ThemeKeys do
@@ -2651,6 +2886,42 @@ function Window:BuildSettings(tab)
 		local color = theming:Colorpicker({ Name = pair[1], Default = Current[key], NoSave = true, Callback = function(value) self:SetThemeColor(key, value) end })
 		table.insert(self.ThemeRows, { Key = key, Color = color })
 	end
+
+	theming:Divider()
+	local themeName = theming:Textbox({ Placeholder = "Theme name", NoSave = true })
+	local themeList = theming:Dropdown({ Name = "Saved themes", Options = self:ListThemes(), Empty = "No themes yet", NoSave = true })
+	local function refreshThemes()
+		themeList:SetOptions(self:ListThemes())
+		themeDropdown:SetOptions(ThemeOrder)
+	end
+	theming:Button({ Name = "Save Theme", Callback = function()
+		local name = cleanName(themeName.Instance.Text)
+		if name == "" then name = themeList.Value or "" end
+		if name == "" then self:Notify("Enter a theme name first."); return end
+		if Themes[name] and not UserThemes[name] then self:Notify("That name belongs to a built-in theme."); return end
+		self:SaveTheme(name)
+		refreshThemes()
+		themeDropdown:Set(name, true)
+		self:Notify(('Saved theme "%s".'):format(name))
+	end })
+	theming:Button({ Name = "Load Theme", Callback = function()
+		local name = themeList.Value
+		if not name then return end
+		if self:LoadTheme(name) then
+			themeDropdown:Set(name, true)
+			self:Notify(('Loaded theme "%s".'):format(name))
+		else
+			self:Notify(('Could not load "%s".'):format(name))
+		end
+	end })
+	theming:Button({ Name = "Delete Theme", Callback = function()
+		local name = themeList.Value
+		if not name then return end
+		self:DeleteTheme(name)
+		themeList:Set(nil, true)
+		refreshThemes()
+		self:Notify(('Deleted theme "%s".'):format(name))
+	end })
 
 	local menu = tab:Section({ Name = "Menu", Icon = "cube", Side = 2 })
 	local menuBind = menu:Keybind({ Name = "Menu Key", Default = self.MenuKey, NoSave = true })
@@ -2733,6 +3004,7 @@ function Window:_placeOverlays()
 end
 
 function Window:Destroy()
+	for _, callback in self.UnloadCallbacks do pcall(callback) end
 	for _, connection in self.Connections do connection:Disconnect() end
 	table.clear(Jobs)
 	table.clear(HoverSet)
@@ -2769,13 +3041,14 @@ function Blossom.new(options)
 		Width = startW, Height = startH, MinSize = minSize, ColumnW = (startW - Metrics.ContentX - Metrics.Pad * 3) / 2,
 		ResizeJobs = {}, ResizeHandles = {},
 		Title = options.Title or "Blossom", Tabs = {}, Sections = {}, Columns = {}, Index = {}, Binds = {}, Colors = {}, Flags = {},
-		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {},
+		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		Visible = true, ThemeName = options.Theme or "Blossom", MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0,
 	}, Window)
 	ensureLoop()
 	LastWindow, Focus = win, win
+	Blossom.Options, Blossom.Toggles = win.Options, win.Toggles
 	if globalEnv then globalEnv.__BlossomWindow = win end
 
 	local screen = new("ScreenGui", { Name = "Blossom", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 100 })
@@ -2894,7 +3167,7 @@ function Blossom.new(options)
 			if inside(dropdown.Panel, point) then return end
 			dropdown:Toggle(false)
 		end
-		for _, column in win.CurrentTab.Columns do
+		for _, column in win:Cols() do
 			if inside(column.Scroll, point) then
 				column:ScrollTo(column.Target - input.Position.Z * 60)
 			end
@@ -2908,7 +3181,7 @@ function Blossom.new(options)
 		win:_flushThemeColors(dt)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
 		if win.CurrentTab then
-			for _, column in win.CurrentTab.Columns do
+			for _, column in win:Cols() do
 				local y = column.Scroll.CanvasPosition.Y
 				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
 				if showTop ~= column.ShowTop then
@@ -2951,5 +3224,82 @@ function Blossom.new(options)
 
 	return win
 end
+
+-------------------------------------------------------------------------------
+-- Obsidian / Linoria style API: Tab:AddGroupbox, Groupbox:AddToggle("Index", { Text = ... }), Toggles.Index:OnChanged(...)
+-------------------------------------------------------------------------------
+
+local function sideOf(side)
+	if side == 2 or (type(side) == "string" and string.lower(side) == "right") then return 2 end
+	return 1
+end
+
+local function keyOf(name)
+	if name == "MB2" then return Enum.UserInputType.MouseButton2 end
+	if name == "MB3" then return Enum.UserInputType.MouseButton3 end
+	local ok, key = pcall(function() return Enum.KeyCode[name] end)
+	return ok and key or nil
+end
+
+function Window:AddTab(name, icon) return self:Tab({ Name = name, Icon = icon }) end
+function Window:OnUnload(callback) table.insert(self.UnloadCallbacks, callback) end
+Window.Unload = Window.Destroy
+
+function Tab:AddGroupbox(o) return self:Section({ Name = o.Name, Icon = o.IconName or o.Icon, Description = o.Description, Side = sideOf(o.Side) }) end
+function Tab:AddLeftGroupbox(name, icon) return self:Section({ Name = name, Icon = icon, Side = 1 }) end
+function Tab:AddRightGroupbox(name, icon) return self:Section({ Name = name, Icon = icon, Side = 2 }) end
+function Tab:AddSubTab(name) return self:SubTab({ Name = name }) end
+SubTab.AddGroupbox, SubTab.AddLeftGroupbox, SubTab.AddRightGroupbox = Tab.AddGroupbox, Tab.AddLeftGroupbox, Tab.AddRightGroupbox
+
+-- Toggles and Labels can chain :AddColorPicker / :AddKeyPicker, as in Obsidian.
+local function chainable(section, object)
+	function object:AddColorPicker(index, o)
+		local color = attachColor(section, object.Item, { Default = o.Default, Alpha = o.Transparency, Callback = o.Callback })
+		color.Item = object.Item
+		register(section, color, { Flag = index, Name = o.Title or index }, object.Item)
+		object.Color = color
+		return object
+	end
+	function object:AddKeyPicker(index, o)
+		local callback = o.Callback
+		local key = attachKeybind(section, object.Item, { Key = keyOf(o.Default), Mode = o.Mode == "Hold" and "Hold" or "Toggle", Name = o.Text or index, OnPress = callback and function() callback(true) end or nil })
+		key.Item = object.Item
+		register(section, key, { Flag = index, Name = o.Text or index }, object.Item)
+		object.Keybind = key
+		return object
+	end
+	return object
+end
+
+function Section:AddToggle(index, o)
+	return chainable(self, self:Toggle({ Name = o.Text, Default = o.Default, Callback = o.Callback, Flag = index }))
+end
+Section.AddCheckbox = Section.AddToggle
+
+function Section:AddSlider(index, o)
+	return self:Slider({ Name = o.Text, Min = o.Min, Max = o.Max, Default = o.Default, Decimals = o.Rounding, Suffix = o.Suffix, Callback = o.Callback, Flag = index })
+end
+
+function Section:AddInput(index, o)
+	return self:Textbox({ Name = o.Text, Placeholder = o.Placeholder, Default = o.Default, Callback = o.Callback, Flag = index })
+end
+
+function Section:AddDropdown(index, o)
+	local values, default = o.Values or {}, o.Default
+	if type(default) == "number" then default = values[default] end
+	if o.Multi and default ~= nil and type(default) ~= "table" then default = { default } end
+	return self:Dropdown({ Name = o.Text, Options = values, Default = default, Multi = o.Multi, Callback = o.Callback, Flag = index })
+end
+
+function Section:AddButton(o, func)
+	if type(o) == "string" then o = { Text = o, Func = func } end
+	return self:Button({ Name = o.Text, Callback = o.Func })
+end
+
+function Section:AddLabel(text, extra)
+	return chainable(self, self:Label({ Name = type(extra) == "table" and extra.Text or text }))
+end
+
+Section.AddDivider = Section.Divider
 
 return Blossom

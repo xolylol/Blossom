@@ -16,6 +16,8 @@
 	Toggle and Label also accept Keybind = and Color = for inline controls.
 	Every element returns an object with .Value and :Set(value, silent).
 
+	Confirm:    Section:Button({ Name = "Unload", Confirm = true, Callback = ... }) - first click turns the label into "Are you sure?".
+	Sounds:     toggles play module_enable.ogg / module_disable.ogg (Blossom.new option Sounds = false, per toggle Sound = false).
 	Sub-tabs:   local Players = Tab:SubTab({ Name = "Players" }); Players:Section({ Name = "ESP", Side = 1 })
 	Gear:       local t = Section:Toggle({ Name = "Enabled", Gear = true }); t.Gear:Slider({ Name = "Hit Chance", ... })
 	Obsidian style: Window:AddTab, Tab:AddGroupbox, Groupbox:AddToggle("Index", { Text = ... }), Window.Toggles / Window.Options
@@ -29,6 +31,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
 
 local INTER = "rbxassetid://12187365364"
 local Vec2, Dim2 = Vector2.new, UDim2.new
@@ -130,6 +133,44 @@ local Current = table.clone(Themes.Blossom)
 local Casing = "Normal"
 local FontFamily = INTER
 local BodyWeight = Enum.FontWeight.SemiBold
+
+-- Sounds are downloaded once into Blossom/sounds and played through getcustomasset.
+local SOUND_BASE = "https://raw.githubusercontent.com/xolylol/Blossom/main/sounds/"
+local SoundFiles = { On = "module_enable.ogg", Off = "module_disable.ogg" }
+local SoundIds, SoundsLoading = {}, false
+local WatermarkOptions = { "Script", "Build", "Name", "FPS", "Ping", "Time", "Session" }
+local WatermarkDefaults = { "Script", "Build", "Name", "FPS", "Ping" }
+
+local function loadSounds()
+	if SoundsLoading or typeof(getcustomasset) ~= "function" or typeof(writefile) ~= "function" or typeof(isfile) ~= "function" then return end
+	SoundsLoading = true
+	for key, file in SoundFiles do
+		task.spawn(function()
+			pcall(function()
+				local path = "Blossom/sounds/" .. file
+				if not isfile(path) then
+					pcall(makefolder, "Blossom")
+					pcall(makefolder, "Blossom/sounds")
+					local data = game:HttpGet(SOUND_BASE .. file)
+					if string.sub(data, 1, 4) ~= "OggS" then return end
+					writefile(path, data)
+				end
+				SoundIds[key] = getcustomasset(path)
+			end)
+		end)
+	end
+end
+
+local function playSound(win, key)
+	local id = SoundIds[key]
+	if not id or not win.Sounds or win.Quiet then return end
+	local sound = Instance.new("Sound")
+	sound.SoundId, sound.Volume = id, 0.5
+	sound.Parent = SoundService
+	sound.Ended:Once(function() sound:Destroy() end)
+	task.delay(6, function() sound:Destroy() end)
+	sound:Play()
+end
 
 -------------------------------------------------------------------------------
 -- Animator: one render-step loop driving springs. Retargeting keeps velocity,
@@ -554,7 +595,12 @@ local function covered(inst, point)
 		if inside(dropdown.Panel, point) then return true end
 	end
 	local popup = win.ActivePopup
-	if popup and inside(popup.Frame, point) and not inst:IsDescendantOf(popup.Frame) then return true end
+	if popup and not inst:IsDescendantOf(popup.Frame) then
+		if inside(popup.Frame, point) then return true end
+		for _, parent in win.PopupStack do
+			if inside(parent.Frame, point) and not inst:IsDescendantOf(parent.Frame) then return true end
+		end
+	end
 	if win.Search and win.Search.Open and not inst:IsDescendantOf(win.Search.Overlay) then return true end
 	return false
 end
@@ -977,8 +1023,9 @@ local function attachColor(section, item, options)
 	local win = section.Window
 	local color = {
 		Value = options.Default or Color3.new(1, 1, 1), Alpha = options.Alpha or 0, Animation = "None",
-		Callback = options.Callback, Flag = options.Flag,
+		Callback = options.Callback, Flag = options.Flag, Phase = 0,
 	}
+	color.Base = color.Value
 	local swatch = new("TextButton", {
 		Size = Offset(Metrics.Swatch - 2, Metrics.Swatch - 2), Radius = Metrics.Radius, BackgroundTransparency = 0,
 		BackgroundColor3 = color.Value, Border = "Outline",
@@ -988,10 +1035,34 @@ local function attachColor(section, item, options)
 	function color:Set(value, alpha, silent)
 		if type(alpha) == "boolean" then alpha, silent = nil, alpha end
 		color.Value = value
+		if not color.Animating then color.Base = value end
 		if alpha ~= nil then color.Alpha = alpha end
 		swatch.BackgroundColor3 = value
-		if win.ActivePopup == win.Picker and win.Picker.Target == color and not win.Picker.Dragging then win.Picker.Sync() end
+		if win.ActivePopup == win.Picker and win.Picker.Target == color and not win.Picker.Dragging then win.Picker.Sync(true) end
 		if not silent then fire(color.Callback, value, color.Alpha) end
+	end
+	function color:SetAnimation(mode)
+		mode = mode or "None"
+		if mode == color.Animation then return end
+		color.Animation, color.Phase = mode, 0
+		if mode == "None" then color:Set(color.Base) end
+	end
+	-- Rainbow and Pulse start from the picked colour and ease in, so switching them on never jumps.
+	function color:Step(dt)
+		color.Phase += dt
+		local h, s, v = color.Base:ToHSV()
+		local ease = math.min(color.Phase / 0.8, 1)
+		if color.Animation == "Rainbow" then
+			s += (math.max(s, 0.6) - s) * ease
+			v += (math.max(v, 0.75) - v) * ease
+			h = (h + color.Phase * 0.1) % 1
+		else
+			v += (math.max(v, 0.6) - v) * ease
+			v *= 0.55 + 0.45 * (0.5 + 0.5 * math.cos(color.Phase * 2.2))
+		end
+		color.Animating = true
+		color:Set(Color3.fromHSV(h, s, v))
+		color.Animating = false
 	end
 	swatch.MouseButton1Click:Connect(function() win:OpenPicker(swatch, color) end)
 	table.insert(win.Colors, color)
@@ -1119,6 +1190,7 @@ function Section:Toggle(options)
 		toggle.Value = value
 		render(true)
 		syncHotkey()
+		if not silent and options.Sound ~= false then playSound(win, value and "On" or "Off") end
 		if not silent then fire(toggle.Callback, value) end
 	end
 
@@ -1560,10 +1632,33 @@ function Section:Button(options)
 	local button = new("TextButton", { Position = Offset(1, 1), Size = Dim2(1, -2, 0, Metrics.ButtonH - 2), Radius = Metrics.Radius, Border = "Outline", BackgroundTransparency = 0 }, item.Frame)
 	interactive(button, "Element", "HoveredElement", "Inline")
 	addGradient(button)
-	local _, setWidth = centeredLabel(button, trackWidth(win), { Text = options.Name, TextSize = 13, RowH = Metrics.ButtonH - 2 })
+	local armed
+	local text, setWidth = centeredLabel(button, trackWidth(win), {
+		Text = options.Name, TextSize = 13, RowH = Metrics.ButtonH - 2,
+		Fg = function() return armed and Current.Accent or Current.Text end,
+	})
 	table.insert(win.ResizeJobs, function() setWidth(trackWidth(win)) end)
 	local object = { Item = item, Instance = button, Callback = options.Callback }
-	button.MouseButton1Click:Connect(function() fire(object.Callback) end)
+	-- Confirm: the first click only rewrites this button's own label, the second one runs the callback.
+	local confirm = options.Confirm or options.DoubleClick
+	local function setArmed(state)
+		armed = state
+		setText(text, state and (options.ConfirmText or "Are you sure?") or options.Name)
+		refresh(text, "Fast")
+	end
+	button.MouseButton1Click:Connect(function()
+		if not confirm then fire(object.Callback); return end
+		if armed then
+			setArmed(nil)
+			fire(object.Callback)
+			return
+		end
+		local mark = {}
+		setArmed(mark)
+		task.delay(options.ConfirmTime or 3, function()
+			if armed == mark then setArmed(nil) end
+		end)
+	end)
 	return object
 end
 
@@ -2081,20 +2176,36 @@ function Window:CloseFloating()
 	self:ClosePopup()
 end
 
-function Window:ClosePopup()
-	local popup = self.ActivePopup
-	if not popup then return end
-	self.ActivePopup = nil
-	self.LastPopupAnchor, self.LastPopupTime = popup.Anchor, os.clock()
+local function hidePopup(win, popup)
+	win.LastPopupAnchor, win.LastPopupTime = popup.Anchor, os.clock()
 	if popup.OnClose then popup.OnClose() end
 	local position = popup.Frame.Position
 	animate(popup.Frame, "Position", Offset(position.X.Offset, position.Y.Offset - 4), "Fast")
 	popup.Fader:Hide()
 end
 
+-- toParent closes only the top popup and hands focus back to the popup that opened it.
+function Window:ClosePopup(toParent)
+	local popup = self.ActivePopup
+	if not popup then return end
+	local stack = self.PopupStack
+	hidePopup(self, popup)
+	self.ActivePopup = toParent and table.remove(stack) or nil
+	if not toParent then
+		for index = #stack, 1, -1 do hidePopup(self, table.remove(stack, index)) end
+	end
+end
+
 function Window:_openPopup(popup, anchor, absolute)
 	if self.LastPopupAnchor == anchor and os.clock() - self.LastPopupTime < 0.2 then return false end
-	self:ClosePopup()
+	local stack = self.PopupStack
+	-- A popup opened from inside another popup (a colour picker in an Options menu) keeps its parent open.
+	while self.ActivePopup and not anchor:IsDescendantOf(self.ActivePopup.Frame) do
+		hidePopup(self, self.ActivePopup)
+		self.ActivePopup = table.remove(stack)
+	end
+	if self.ActivePopup then table.insert(stack, self.ActivePopup) end
+	popup.Frame.ZIndex = #stack + 1
 	local point = toLayer(absolute)
 	local viewport, size = self.Screen.AbsoluteSize, popup.Frame.Size
 	local x = math.clamp(floor(point.X), 8, math.max(8, viewport.X - size.X.Offset - 8))
@@ -2236,6 +2347,9 @@ function Window:_overControl(point)
 	if self.Search.Open then return true end
 	if self.OpenDropdown and inside(self.OpenDropdown.Panel, point) then return true end
 	if self.ActivePopup and inside(self.ActivePopup.Frame, point) then return true end
+	for _, parent in self.PopupStack do
+		if inside(parent.Frame, point) then return true end
+	end
 	if inside(self.SearchButton, point) then return true end
 	for _, handle in self.ResizeHandles do
 		if inside(handle, point) then return true end
@@ -2424,14 +2538,14 @@ function Window:_buildPicker()
 		if picker.Target then picker.Target:Set(Color3.fromHSV(picker.H, picker.S, picker.V), picker.Alpha) end
 	end
 
-	function picker.Sync()
+	function picker.Sync(keepAnimation)
 		local target = picker.Target
 		if not target then return end
-		local h, s, v = target.Value:ToHSV()
+		local h, s, v = target.Base:ToHSV()
 		if s > 0 and v > 0 then picker.H = h end
 		picker.S, picker.V, picker.Alpha = s, v, target.Alpha or 0
 		paint()
-		if picker.Animation then picker.Animation:Set(target.Animation or "None", true) end
+		if picker.Animation and not keepAnimation then picker.Animation:Set(target.Animation or "None", true) end
 	end
 
 	-- Each hit area overhangs its control so knobs resting on an edge can still be grabbed.
@@ -2462,7 +2576,7 @@ function Window:_buildPicker()
 	picker.Animation = buildDropdown(self, holder, {
 		Options = { "None", "Rainbow", "Pulse" }, Default = "None", MaxRows = 3,
 		Callback = function(value)
-			if picker.Target then picker.Target.Animation = value end
+			if picker.Target then picker.Target:SetAnimation(value) end
 		end,
 	})
 	picker.OnClose = function() picker.Animation:Toggle(false) end
@@ -2652,7 +2766,7 @@ function Window:_serialize()
 	for flag, object in self.Flags do
 		local value = object.Value
 		if object.Swatch then
-			value = { Color = object.Value:ToHex(), Alpha = object.Alpha }
+			value = { Color = object.Base:ToHex(), Alpha = object.Alpha, Animation = object.Animation ~= "None" and object.Animation or nil }
 		elseif object.Chip then
 			value = { Key = object.Key and object.Key.Name or false, Mode = object.Mode }
 		elseif object.Multi then
@@ -2670,12 +2784,14 @@ end
 function Window:_deserialize(json)
 	local ok, data = pcall(HttpService.JSONDecode, HttpService, json)
 	if not ok or type(data) ~= "table" then return false end
+	self.Quiet = true
 	for flag, value in data do
 		local object = self.Flags[flag]
 		if object then
 			pcall(function()
 				if object.Swatch then
 					object:Set(Color3.fromHex(value.Color), value.Alpha)
+					object:SetAnimation(value.Animation)
 				elseif object.Chip then
 					object.Mode = value.Mode or object.Mode
 					local key = nil
@@ -2689,6 +2805,7 @@ function Window:_deserialize(json)
 			end)
 		end
 	end
+	self.Quiet = false
 	return true
 end
 
@@ -2829,6 +2946,21 @@ function Window:BuildSettings(tab)
 	local saved = readAutoload()
 	local autoloadOn, autoloadName = saved ~= nil, saved
 	local autoloadList
+	local menu = tab:Section({ Name = "Menu", Icon = "cube", Side = 1 })
+	local menuBind = menu:Keybind({ Name = "Menu Key", Default = self.MenuKey, NoSave = true })
+	menuBind.OnKeyChanged = function() self.MenuKey = menuBind.Key end
+	local watermark = menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Gear = true, Callback = function(value) self.Watermark.Visible = value end })
+	watermark.Gear:Dropdown({ Name = "Show", Options = WatermarkOptions, Default = WatermarkDefaults, Multi = true, MaxRows = #WatermarkOptions, NoSave = true, Callback = function(set) self:SetWatermarkItems(set) end })
+	menu:Toggle({ Name = "Hotkey List", Default = true, NoSave = true, Callback = function(value) self.Hotkeys.Visible = value end })
+	menu:Toggle({ Name = "Sounds", Default = self.Sounds, NoSave = true, Callback = function(value)
+		self.Sounds = value
+		if value then loadSounds() end
+	end })
+	local fontName = "Inter"
+	for name, family in Fonts do if family == FontFamily then fontName = name end end
+	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, NoSave = true, Callback = function(value) self:SetFont(value) end })
+	menu:Dropdown({ Name = "Text Weight", Options = WeightOrder, Default = BodyWeight.Name, NoSave = true, Callback = function(value) self:SetTextWeight(value) end })
+	menu:Button({ Name = "Unload", Confirm = true, Callback = function() self:Destroy() end })
 	local profiles = tab:Section({ Name = "Profiles", Icon = "cube", Side = 1 })
 	profiles:Label({ Name = "Configs" })
 	local listbox = profiles:Listbox({ Height = 177, Empty = "No configs yet", Options = self:ListConfigs(), Callback = function(value) selected = value end })
@@ -2923,16 +3055,6 @@ function Window:BuildSettings(tab)
 		self:Notify(('Deleted theme "%s".'):format(name))
 	end })
 
-	local menu = tab:Section({ Name = "Menu", Icon = "cube", Side = 2 })
-	local menuBind = menu:Keybind({ Name = "Menu Key", Default = self.MenuKey, NoSave = true })
-	menuBind.OnKeyChanged = function() self.MenuKey = menuBind.Key end
-	menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Callback = function(value) self.Watermark.Visible = value end })
-	menu:Toggle({ Name = "Hotkey List", Default = true, NoSave = true, Callback = function(value) self.Hotkeys.Visible = value end })
-	local fontName = "Inter"
-	for name, family in Fonts do if family == FontFamily then fontName = name end end
-	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, NoSave = true, Callback = function(value) self:SetFont(value) end })
-	menu:Dropdown({ Name = "Text Weight", Options = WeightOrder, Default = BodyWeight.Name, NoSave = true, Callback = function(value) self:SetTextWeight(value) end })
-
 	if saved then
 		task.defer(function()
 			if self:LoadConfig(saved) then self:Notify(('Autoloaded "%s".'):format(saved)) end
@@ -2944,38 +3066,106 @@ function Window:_buildWatermark(options)
 	local player = Players.LocalPlayer
 	local frame = new("Frame", { Bg = "Background", Size = Offset(298, 28), Radius = Metrics.FloatRadius, Border = "Outline", Active = true }, self.Screen)
 	makeIcon(frame, "logo", 16, "Accent", "Background", { Position = Offset(8, 6) })
-	local function text(value, size, weight)
-		return label(frame, { Text = value, TextSize = size, Weight = weight, RowH = 28, W = 10 })
+	self.Watermark = frame
+	local show, order, parts, layout = {}, {}, {}
+	for _, key in WatermarkDefaults do show[key] = true end
+
+	local function add(key, size, weight, icon)
+		local part = {
+			Key = key,
+			Sep = new("Frame", { Bg = "Outline", Position = Offset(0, 7), Size = Offset(1, 14), Visible = false }, frame),
+			Text = label(frame, { Text = "", TextSize = size, Weight = weight, RowH = 28, W = 10 }),
+			Icon = icon and makeIcon(frame, icon, 13, "Text", "Background"),
+		}
+		part.Text:GetPropertyChangedSignal("TextBounds"):Connect(function() if layout then layout() end end)
+		table.insert(order, part)
+		parts[key] = part
 	end
-	local function sep()
-		return new("Frame", { Bg = "Outline", Position = Offset(0, 7), Size = Offset(1, 14) }, frame)
+	add("Script", 12, Enum.FontWeight.Medium)
+	add("Build", 12, Enum.FontWeight.SemiBold)
+	add("Name", 11, Enum.FontWeight.SemiBold, "user")
+	add("FPS", 11, Enum.FontWeight.SemiBold)
+	add("Ping", 11, Enum.FontWeight.SemiBold)
+	add("Time", 11, Enum.FontWeight.SemiBold)
+	add("Session", 11, Enum.FontWeight.SemiBold)
+
+	local started, fps = os.clock(), 60
+	local function ping()
+		local ok, value = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() end)
+		return ok and value or 0
 	end
-	local first, firstSep = text(options.Script or "blossom.lua", 12, Enum.FontWeight.Medium), sep()
-	local second, secondSep = text(options.Build or "release", 12, Enum.FontWeight.SemiBold), sep()
-	local userIcon = makeIcon(frame, "user", 13, "Text", "Background")
-	local third = text(("%s (@%s)"):format(player.DisplayName, player.Name), 11, Enum.FontWeight.SemiBold)
-	local function layout()
-		local x = 31
-		for _, entry in { { first, firstSep }, { second, secondSep } } do
-			local width = math.ceil(entry[1].TextBounds.X)
-			entry[1].Size = Offset(width + 1, 28)
-			entry[1].Position = Offset(x, entry[1].Position.Y.Offset)
-			x += width + 8
-			entry[2].Position = Offset(x, 7)
-			x += 9
+	local producers = {
+		Script = function() return options.Script or "blossom.lua" end,
+		Build = function() return options.Build or "release" end,
+		Name = function() return ("%s (@%s)"):format(player.DisplayName, player.Name) end,
+		FPS = function() return fps .. " fps" end,
+		Ping = function() return floor(ping()) .. " ms" end,
+		Time = function() return os.date("%H:%M") end,
+		Session = function()
+			local seconds = floor(os.clock() - started)
+			return ("%d:%02d:%02d"):format(seconds // 3600, seconds % 3600 // 60, seconds % 60)
+		end,
+	}
+	local function update()
+		for key, part in parts do
+			if show[key] then
+				local value = producers[key]()
+				if part.Text.Text ~= applyCase(value) then setText(part.Text, value) end
+			end
 		end
-		userIcon.Root.Position = Offset(x, 7)
-		x += 20
-		local width = math.ceil(third.TextBounds.X)
-		third.Size = Offset(width + 1, 28)
-		third.Position = Offset(x, third.Position.Y.Offset)
-		frame.Size = Offset(x + width + Metrics.Pad, 28)
+	end
+
+	layout = function()
+		local visible = {}
+		for _, part in order do
+			local on = show[part.Key] == true
+			part.Text.Visible, part.Sep.Visible = on, false
+			if part.Icon then part.Icon.Root.Visible = on end
+			if on then table.insert(visible, part) end
+		end
+		local x = 31
+		for index, part in visible do
+			if part.Icon then
+				part.Icon.Root.Position = Offset(x, 7)
+				x += 20
+			end
+			local width = math.ceil(part.Text.TextBounds.X)
+			part.Text.Size = Offset(width + 1, 28)
+			part.Text.Position = Offset(x, part.Text.Position.Y.Offset)
+			x += width
+			if index < #visible then
+				x += 8
+				part.Sep.Position = Offset(x, 7)
+				part.Sep.Visible = true
+				x += 9
+			end
+		end
+		frame.Size = Offset(x + Metrics.Pad, 28)
 		self:_placeOverlays()
 	end
-	for _, entry in { first, second, third } do
-		entry:GetPropertyChangedSignal("TextBounds"):Connect(layout)
+
+	-- Takes the Multi dropdown's value ({ FPS = true }) or a plain list ({ "FPS" }).
+	function self:SetWatermarkItems(set)
+		table.clear(show)
+		for key, on in set do
+			if on == true and parts[key] then show[key] = true
+			elseif type(on) == "string" and parts[on] then show[on] = true end
+		end
+		update()
+		layout()
 	end
-	self.Watermark = frame
+
+	local accumulated, frames = 0, 0
+	table.insert(self.Connections, RunService.Heartbeat:Connect(function(dt)
+		accumulated += dt
+		frames += 1
+		if accumulated < 0.5 then return end
+		fps, accumulated, frames = round(frames / accumulated), 0, 0
+		update()
+	end))
+
+	update()
+	layout()
 	self.WatermarkLayout = layout
 	self:_makeDraggable(frame, frame)
 end
@@ -3044,10 +3234,11 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		Visible = true, ThemeName = options.Theme or "Blossom", MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
-		LastPopupTime = 0, DropdownClosedAt = 0,
+		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {}, Sounds = options.Sounds ~= false,
 	}, Window)
 	ensureLoop()
 	LastWindow, Focus = win, win
+	if win.Sounds then loadSounds() end
 	Blossom.Options, Blossom.Toggles = win.Options, win.Toggles
 	if globalEnv then globalEnv.__BlossomWindow = win end
 
@@ -3118,8 +3309,12 @@ function Blossom.new(options)
 				end
 				dropdown:Toggle(false)
 			end
-			if win.ActivePopup and not overDropdown and not inside(win.ActivePopup.Frame, point, 6) then
-				win:ClosePopup()
+			while win.ActivePopup and not overDropdown and not inside(win.ActivePopup.Frame, point, 6) do
+				local overParent = false
+				for _, parent in win.PopupStack do
+					if inside(parent.Frame, point, 6) then overParent = true end
+				end
+				win:ClosePopup(overParent)
 			end
 		end
 		local listening = win.Listening
@@ -3174,10 +3369,7 @@ function Blossom.new(options)
 		end
 	end))
 
-	local clock, colorClock = 0, 0
 	local function perFrame(dt)
-		clock += dt
-		colorClock += dt
 		win:_flushThemeColors(dt)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
 		if win.CurrentTab then
@@ -3198,17 +3390,8 @@ function Blossom.new(options)
 			win.Search.Dirty = false
 			win.Search.Sync()
 		end
-		if colorClock >= 1 / 30 then
-			colorClock = 0
-			for _, color in win.Colors do
-				if color.Animation == "Rainbow" then
-					local _, s, v = color.Value:ToHSV()
-					color:Set(Color3.fromHSV((clock * 0.25) % 1, math.max(s, 0.5), math.max(v, 0.6)))
-				elseif color.Animation == "Pulse" then
-					local h, s = color.Value:ToHSV()
-					color:Set(Color3.fromHSV(h, s, 0.65 + math.sin(clock * 4) * 0.35))
-				end
-			end
+		for _, color in win.Colors do
+			if color.Animation ~= "None" then color:Step(dt) end
 		end
 	end
 	Jobs[perFrame] = true
@@ -3293,7 +3476,7 @@ end
 
 function Section:AddButton(o, func)
 	if type(o) == "string" then o = { Text = o, Func = func } end
-	return self:Button({ Name = o.Text, Callback = o.Func })
+	return self:Button({ Name = o.Text, Callback = o.Func, Confirm = o.Confirm or o.DoubleClick, ConfirmText = o.ConfirmText })
 end
 
 function Section:AddLabel(text, extra)

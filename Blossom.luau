@@ -22,6 +22,10 @@
 	Obsidian style: Window:AddTab, Tab:AddGroupbox, Groupbox:AddToggle("Index", { Text = ... }), Window.Toggles / Window.Options
 	            (also Blossom.Toggles / Blossom.Options), object:OnChanged(fn), object:SetValue(v), Window:OnUnload(fn).
 
+	Icons:      Lucide icon names from lucide.dev/icons: Icon = "target", "bot", "settings", "swords".
+	            Downloaded from GitHub on first use and cached in Blossom/icons. Blossom.AddIcon(name, svg) adds your own.
+	            Blossom.new options: IconBase (another URL folder with <name>.svg), IconStroke (default 2).
+
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
 	Size and MinSize (Vector2), Resizable (default true). Window:SetSize(width, height) resizes from code.
 ]]
@@ -669,97 +673,337 @@ function Fader:Hide(onDone, preset)
 end
 
 -------------------------------------------------------------------------------
--- Icons: drawn from frames on a 16x16 grid, so no decals have to be uploaded
--- { kind, x, y, w, h, radius, rotation }   kind: f = fill, h = hole, r = ring
+-- Icons: Lucide (lucide.dev). An icon name is a Lucide file name: "target", "bot", "settings", "flower".
+-- The SVG is downloaded from GitHub on first use, cached in Blossom/icons and drawn from frames,
+-- so no uploaded decals or asset ids are needed. Old Blossom names still work through IconAliases.
 -------------------------------------------------------------------------------
 
-local Icons = {
-	target = { { "f", 0.5, 0.5, 15, 15, FULL }, { "h", 3, 3, 10, 10, FULL }, { "f", 4.8, 4.8, 6.4, 6.4, FULL } },
-	bullet = { { "f", 1, 4, 3, 8, 1 }, { "f", 5, 4, 6, 8, 1 }, { "f", 8.2, 5.2, 5.6, 5.6, 1, 45 } },
-	smile = {
-		{ "f", 1, 1, 14, 14, FULL }, { "h", 4.4, 5, 2.6, 2.6, FULL }, { "h", 9, 5, 2.6, 2.6, FULL },
-		{ "h", 4.6, 9.8, 6.8, 2, FULL },
-	},
-	globe = {
-		{ "f", 1, 1, 14, 14, FULL }, { "h", 3, 3.2, 4.4, 3, FULL, -20 }, { "h", 8.2, 8, 4.6, 3.8, FULL, 20 },
-		{ "h", 9.8, 2.8, 2.6, 2, FULL }, { "h", 3.4, 9.6, 2.6, 2.6, FULL },
-	},
-	bomb = { { "f", 1, 4, 11, 11, FULL }, { "f", 9.2, 2.8, 4, 3, 0.5, 45 }, { "f", 12.8, 0.8, 2.4, 2.4, FULL } },
-	file = {
-		{ "f", 3, 1, 10, 14, 1.5 }, { "h", 10.6, -0.8, 4.2, 4.2, 0, 45 }, { "h", 5.5, 7.5, 5, 1.1, 0 },
-		{ "h", 5.5, 10.3, 5, 1.1, 0 },
-	},
-	gear = {
-		{ "f", 6.5, 0.8, 3, 14.4, 0.6, 0 }, { "f", 6.5, 0.8, 3, 14.4, 0.6, 45 }, { "f", 6.5, 0.8, 3, 14.4, 0.6, 90 },
-		{ "f", 6.5, 0.8, 3, 14.4, 0.6, 135 }, { "f", 2.6, 2.6, 10.8, 10.8, FULL }, { "h", 5.6, 5.6, 4.8, 4.8, FULL },
-	},
-	robot = {
-		{ "f", 7.2, 2, 1.6, 3.5, 0 }, { "f", 6.4, 0.5, 3.2, 3.2, FULL }, { "f", 2.2, 5, 11.6, 9.4, 2 },
-		{ "f", 0.2, 8, 1.4, 4, 0.5 }, { "f", 14.4, 8, 1.4, 4, 0.5 }, { "h", 4.6, 7.6, 2.5, 2.5, FULL },
-		{ "h", 8.9, 7.6, 2.5, 2.5, FULL }, { "h", 5.4, 11.4, 5.2, 1.1, 0 },
-	},
-	wrench = {
-		{ "f", 5.6, 4.2, 3.8, 12.6, 1.4, 45 }, { "f", 8.8, 0.8, 6.6, 6.6, FULL },
-		{ "h", 11.4, -1.2, 3.2, 5.8, 0, 45 },
-	},
-	cube = {
-		{ "f", 4, 1.1, 8, 13.8, 0, 0 }, { "f", 4, 1.1, 8, 13.8, 0, 60 }, { "f", 4, 1.1, 8, 13.8, 0, 120 },
-		{ "h", 7.5, 8, 1, 6.6, 0, 0 }, { "h", 4.6, 2.6, 1, 6.8, 0, 120 }, { "h", 10.4, 2.6, 1, 6.8, 0, 60 },
-	},
-	search = { { "r", 2, 2, 9, 9, FULL, 0, 1.7 }, { "f", 9.6, 11.2, 5.6, 2, FULL, 45 } },
-	user = { { "f", 5, 1, 6, 6, FULL }, { "f", 2.5, 8.5, 11, 6.5, 3 } },
-	key = {
-		{ "f", 1, 8.5, 7, 7, FULL }, { "f", 6.2, 5, 9, 2.2, 0.6, -45 }, { "f", 11.2, 4.6, 3.4, 2, 0.4, 45 },
-		{ "h", 3.1, 10.6, 2.8, 2.8, FULL },
-	},
-	grip = { { "f", 5.5, 11.3, 11, 1.5, FULL, -45 }, { "f", 10.2, 12.7, 5.6, 1.5, FULL, -45 } },
-	check = { { "f", 2, 8.4, 6.2, 2, FULL, 45 }, { "f", 5.2, 6.8, 10, 2, FULL, -45 } },
-	layout = { { "f", 0.5, 1, 15, 4.5, 1 }, { "f", 0.5, 6.5, 7, 8.5, 1 }, { "f", 8.5, 6.5, 7, 8.5, 1 } },
-	reset = { { "r", 2.6, 2.6, 10.8, 10.8, FULL, 0, 1.8 }, { "h", 9.5, 0.5, 6, 5.5, 0 }, { "f", 9.2, 1.2, 4.6, 4.6, 0.5, 45 } },
-	logo = (function()
-		local parts = { { "f", 0.6, 0.6, 14.8, 14.8, FULL } }
-		for arm = 0, 2 do
-			for step = 0, 3 do
-				local degrees = arm * 120 + step * 42
-				local angle, radius = math.rad(degrees), 6.3 - step * 1.45
-				local cx, cy = 8 + math.cos(angle) * radius, 8 + math.sin(angle) * radius
-				table.insert(parts, { "h", cx - 2, cy - 0.6, 4, 1.2, FULL, degrees + 118 })
+local IconBase = {
+	"https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/",
+	"https://cdn.jsdelivr.net/gh/lucide-icons/lucide@main/icons/",
+}
+local IconStroke = 2   -- Lucide's own stroke width on its 24 unit grid
+local IconAliases = {
+	robot = "bot", gear = "settings", layout = "layout-template", cube = "box",
+	reset = "rotate-ccw", logo = "flower", bullet = "crosshair",
+}
+-- SVG text registered by name never touches the network (Blossom.AddIcon adds to this).
+local IconSVG = {
+	["blossom-resize"] = '<path d="M21 15l-6 6"/><path d="M21 8L8 21"/>',
+}
+local IconGeometry, IconPending = {}, {}
+
+-- Flattens one SVG path string into polylines ({ x1, y1, x2, y2, ... }) on the 24 unit grid.
+local function pathPolylines(d, out)
+	local pos, len = 1, #d
+	local function skip() pos = string.find(d, "[^%s,]", pos) or len + 1 end
+	local function number()
+		skip()
+		local first, last = string.find(d, "^[-+]?%d*%.?%d*", pos)
+		if not first or last < first then return nil end
+		local exponent = select(2, string.find(d, "^[eE][-+]?%d+", last + 1))
+		if exponent then last = exponent end
+		local value = tonumber(string.sub(d, first, last))
+		if not value then return nil end
+		pos = last + 1
+		return value
+	end
+	local function flag()
+		skip()
+		local c = string.sub(d, pos, pos)
+		if c == "0" or c == "1" then
+			pos += 1
+			return tonumber(c)
+		end
+		return nil
+	end
+	local function args(count)
+		local list = {}
+		for index = 1, count do
+			local value = number()
+			if not value then return nil end
+			list[index] = value
+		end
+		return list
+	end
+
+	local cx, cy, sx, sy = 0, 0, 0, 0
+	local cubicX, cubicY, quadX, quadY
+	local cur
+	local function lineTo(x, y)
+		if not cur then
+			cur = { cx, cy }
+			table.insert(out, cur)
+		end
+		cx, cy = x, y
+		table.insert(cur, x)
+		table.insert(cur, y)
+	end
+	local function cubic(x1, y1, x2, y2, x, y)
+		local x0, y0 = cx, cy
+		for step = 1, 8 do
+			local t = step / 8
+			local u = 1 - t
+			lineTo(u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x,
+				u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y)
+		end
+		cubicX, cubicY = x2, y2
+	end
+	local function quad(x1, y1, x, y)
+		local x0, y0 = cx, cy
+		for step = 1, 6 do
+			local t = step / 6
+			local u = 1 - t
+			lineTo(u * u * x0 + 2 * u * t * x1 + t * t * x, u * u * y0 + 2 * u * t * y1 + t * t * y)
+		end
+		quadX, quadY = x1, y1
+	end
+	local function arc(rx, ry, degrees, large, sweep, x, y)
+		local x0, y0 = cx, cy
+		if x0 == x and y0 == y then return end
+		rx, ry = abs(rx), abs(ry)
+		if rx == 0 or ry == 0 then lineTo(x, y) return end
+		local phi = math.rad(degrees)
+		local cosP, sinP = math.cos(phi), math.sin(phi)
+		local dx, dy = (x0 - x) / 2, (y0 - y) / 2
+		local x1 = cosP * dx + sinP * dy
+		local y1 = -sinP * dx + cosP * dy
+		local lambda = x1 * x1 / (rx * rx) + y1 * y1 / (ry * ry)
+		if lambda > 1 then
+			local grow = math.sqrt(lambda)
+			rx, ry = rx * grow, ry * grow
+		end
+		local sign = large == sweep and -1 or 1
+		local numerator = rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1
+		local denominator = rx * rx * y1 * y1 + ry * ry * x1 * x1
+		local coef = sign * math.sqrt(math.max(0, numerator / denominator))
+		local cxp, cyp = coef * rx * y1 / ry, -coef * ry * x1 / rx
+		local centerX = cosP * cxp - sinP * cyp + (x0 + x) / 2
+		local centerY = sinP * cxp + cosP * cyp + (y0 + y) / 2
+		local start = math.atan2((y1 - cyp) / ry, (x1 - cxp) / rx)
+		local delta = math.atan2((-y1 - cyp) / ry, (-x1 - cxp) / rx) - start
+		if sweep == 0 and delta > 0 then delta -= math.pi * 2 elseif sweep == 1 and delta < 0 then delta += math.pi * 2 end
+		local steps = math.max(1, math.ceil(abs(delta) / math.rad(18)))
+		for step = 1, steps do
+			if step == steps then
+				lineTo(x, y)
+			else
+				local angle = start + delta * step / steps
+				local ca, sa = math.cos(angle), math.sin(angle)
+				lineTo(centerX + rx * ca * cosP - ry * sa * sinP, centerY + rx * ca * sinP + ry * sa * cosP)
 			end
 		end
-		table.insert(parts, { "h", 7, 7, 2, 2, FULL })
-		return parts
-	end)(),
-}
+	end
+
+	local cmd
+	while true do
+		skip()
+		if pos > len then break end
+		local c = string.sub(d, pos, pos)
+		if string.find(c, "%a") then
+			cmd = c
+			pos += 1
+			if cmd == "z" or cmd == "Z" then
+				if cur then lineTo(sx, sy) end
+				cx, cy, cur, cmd = sx, sy, nil, nil
+				continue
+			end
+		elseif not cmd or not string.find(c, "[%d%.%-%+]") then
+			break
+		end
+		local relative = cmd == string.lower(cmd)
+		local op = string.upper(cmd)
+		local ox, oy = relative and cx or 0, relative and cy or 0
+		if op ~= "C" and op ~= "S" then cubicX = nil end
+		if op ~= "Q" and op ~= "T" then quadX = nil end
+		if op == "M" then
+			local v = args(2)
+			if not v then break end
+			cx, cy = v[1] + ox, v[2] + oy
+			sx, sy, cur = cx, cy, nil
+			cmd = relative and "l" or "L"
+		elseif op == "L" then
+			local v = args(2)
+			if not v then break end
+			lineTo(v[1] + ox, v[2] + oy)
+		elseif op == "H" then
+			local v = args(1)
+			if not v then break end
+			lineTo(v[1] + ox, cy)
+		elseif op == "V" then
+			local v = args(1)
+			if not v then break end
+			lineTo(cx, v[1] + oy)
+		elseif op == "C" then
+			local v = args(6)
+			if not v then break end
+			cubic(v[1] + ox, v[2] + oy, v[3] + ox, v[4] + oy, v[5] + ox, v[6] + oy)
+		elseif op == "S" then
+			local v = args(4)
+			if not v then break end
+			local x1, y1 = cx, cy
+			if cubicX then x1, y1 = 2 * cx - cubicX, 2 * cy - cubicY end
+			cubic(x1, y1, v[1] + ox, v[2] + oy, v[3] + ox, v[4] + oy)
+		elseif op == "Q" then
+			local v = args(4)
+			if not v then break end
+			quad(v[1] + ox, v[2] + oy, v[3] + ox, v[4] + oy)
+		elseif op == "T" then
+			local v = args(2)
+			if not v then break end
+			local x1, y1 = cx, cy
+			if quadX then x1, y1 = 2 * cx - quadX, 2 * cy - quadY end
+			quad(x1, y1, v[1] + ox, v[2] + oy)
+		elseif op == "A" then
+			local rx, ry, rotation = number(), number(), number()
+			local large, sweep = flag(), flag()
+			local x, y = number(), number()
+			if not (rx and ry and rotation and large and sweep and x and y) then break end
+			arc(rx, ry, rotation, large, sweep, x + ox, y + oy)
+		else
+			break
+		end
+	end
+end
+
+-- Reads the shapes of a Lucide SVG (path, circle, ellipse, rect, line, polyline, polygon).
+local function parseSVG(text)
+	local out = {}
+	for tag, attrs in string.gmatch(text, "<(%a+)%s([^>]*)>") do
+		local a = {}
+		for key, value in string.gmatch(attrs, '([%w%-:]+)%s*=%s*"([^"]*)"') do a[key] = value end
+		local function n(key) return tonumber(a[key]) or 0 end
+		if tag == "path" and a.d then
+			pathPolylines(a.d, out)
+		elseif tag == "circle" or tag == "ellipse" then
+			local x, y = n("cx"), n("cy")
+			local rx = tag == "circle" and n("r") or n("rx")
+			local ry = tag == "circle" and n("r") or n("ry")
+			pathPolylines(string.format("M%f %fa%f %f 0 1 0 %f 0a%f %f 0 1 0 %f 0z", x - rx, y, rx, ry, rx * 2, rx, ry, -rx * 2), out)
+		elseif tag == "rect" then
+			local x, y, w, h = n("x"), n("y"), n("width"), n("height")
+			local rx = a.rx and n("rx") or n("ry")
+			local ry = a.ry and n("ry") or rx
+			rx, ry = math.min(rx, w / 2), math.min(ry, h / 2)
+			if rx > 0 and ry > 0 then
+				pathPolylines(string.format("M%f %fH%fA%f %f 0 0 1 %f %fV%fA%f %f 0 0 1 %f %fH%fA%f %f 0 0 1 %f %fV%fA%f %f 0 0 1 %f %fZ",
+					x + rx, y, x + w - rx, rx, ry, x + w, y + ry, y + h - ry, rx, ry, x + w - rx, y + h,
+					x + rx, rx, ry, x, y + h - ry, y + ry, rx, ry, x + rx, y), out)
+			else
+				pathPolylines(string.format("M%f %fH%fV%fH%fZ", x, y, x + w, y + h, x), out)
+			end
+		elseif tag == "line" then
+			pathPolylines(string.format("M%f %fL%f %f", n("x1"), n("y1"), n("x2"), n("y2")), out)
+		elseif (tag == "polyline" or tag == "polygon") and a.points then
+			local d = ""
+			local index = 0
+			for number in string.gmatch(a.points, "[-+]?%d*%.?%d+") do
+				index += 1
+				d = d .. (index == 1 and "M" or (index == 2 and " " or (index % 2 == 1 and "L" or " "))) .. number
+			end
+			pathPolylines(d .. (tag == "polygon" and "Z" or ""), out)
+		end
+	end
+	return out
+end
+
+local function httpGet(url)
+	local ok, body = pcall(function() return game:HttpGet(url) end)
+	if ok and type(body) == "string" then return body end
+	ok, body = pcall(HttpService.GetAsync, HttpService, url)
+	if ok and type(body) == "string" then return body end
+	return nil
+end
+
+local function iconSource(name)
+	if IconSVG[name] then return IconSVG[name] end
+	local path = "Blossom/icons/" .. name .. ".svg"
+	if typeof(isfile) == "function" and typeof(readfile) == "function" and isfile(path) then
+		local ok, text = pcall(readfile, path)
+		if ok and type(text) == "string" and string.find(text, "<svg", 1, true) then return text end
+	end
+	for _, base in IconBase do
+		local text = httpGet(base .. name .. ".svg")
+		if text and string.find(text, "<svg", 1, true) then
+			if typeof(writefile) == "function" then
+				if typeof(makefolder) == "function" then
+					pcall(makefolder, "Blossom")
+					pcall(makefolder, "Blossom/icons")
+				end
+				pcall(writefile, path, text)
+			end
+			return text
+		end
+	end
+	return nil
+end
+
+-- Calls back with the polylines of an icon; concurrent requests for one name share a single download.
+local function loadIcon(name, callback)
+	local ready = IconGeometry[name]
+	if ready then callback(ready) return end
+	local waiting = IconPending[name]
+	if waiting then table.insert(waiting, callback) return end
+	IconPending[name] = { callback }
+	task.spawn(function()
+		local text = string.match(name, "^[%w%-_]+$") and iconSource(name)
+		local polylines = text and parseSVG(text) or {}
+		if #polylines == 0 then warn("[Blossom] icon not found: " .. name) end
+		IconGeometry[name] = polylines
+		local list = IconPending[name]
+		IconPending[name] = nil
+		for _, fn in list do fn(polylines) end
+	end)
+end
+
+-- Every segment is a rounded frame, so joins and caps are round like Lucide's. Colours follow the theme.
+local function drawIcon(root, icon, polylines, size, color)
+	local scale = size / 24
+	local thick = IconStroke * scale
+	local minStep = math.max(thick * 0.45, 0.3)
+	for _, poly in polylines do
+		local points = { poly[1] * scale, poly[2] * scale }
+		for index = 3, #poly, 2 do
+			local x, y = poly[index] * scale, poly[index + 1] * scale
+			local last = #points
+			local dx, dy = x - points[last - 1], y - points[last]
+			if index + 1 >= #poly or dx * dx + dy * dy >= minStep * minStep then
+				table.insert(points, x)
+				table.insert(points, y)
+			end
+		end
+		for index = 1, #points - 2, 2 do
+			local x1, y1, x2, y2 = points[index], points[index + 1], points[index + 2], points[index + 3]
+			local dx, dy = x2 - x1, y2 - y1
+			local length = math.sqrt(dx * dx + dy * dy)
+			local frame = new("Frame", {
+				Bg = color, AnchorPoint = Vec2(0.5, 0.5), Radius = FULL,
+				Position = Dim2((x1 + x2) / 2 / size, 0, (y1 + y2) / 2 / size, 0),
+				Size = Dim2((length + thick) / size, 0, thick / size, 0),
+				Rotation = math.deg(math.atan2(dy, dx)),
+			}, root)
+			table.insert(icon.Parts, frame)
+		end
+	end
+end
 
 local function makeIcon(parent, name, size, color, hole, props)
 	props = props or {}
 	local root = new("Frame", { Name = "Icon", Size = Offset(size, size), Position = props.Position, AnchorPoint = props.AnchorPoint, ZIndex = props.ZIndex }, parent)
 	local icon = { Root = root, Parts = {} }
+	function icon.Update(preset)
+		for _, part in icon.Parts do refresh(part, preset) end
+	end
 	if type(name) == "string" and string.find(name, "rbxasset", 1, true) then
 		local image = new("ImageLabel", { Size = Dim2(1, 0, 1, 0), Image = name }, root)
 		bind(image, "ImageColor3", color)
 		table.insert(icon.Parts, image)
 	else
-		local scale = size / 16
-		for _, part in Icons[name] or Icons.cube do
-			local kind, x, y, w, h, radius, rotation, thickness = table.unpack(part, 1, 8)
-			local frame = new("Frame", {
-				Position = UDim2.fromScale(x / 16, y / 16), Size = UDim2.fromScale(w / 16, h / 16),
-				Rotation = rotation or 0, Radius = radius and radius > 0 and (radius >= FULL and FULL or math.max(1, round(radius * scale))) or nil,
-			}, root)
-			if kind == "r" then
-				local stroke = new("UIStroke", { Thickness = (thickness or 1.5) * scale }, frame)
-				bind(stroke, "Color", color)
-				table.insert(icon.Parts, stroke)
-			else
-				frame.BackgroundTransparency = 0
-				bind(frame, "BackgroundColor3", kind == "h" and hole or color)
-				table.insert(icon.Parts, frame)
-			end
-		end
-	end
-	function icon.Update(preset)
-		for _, part in icon.Parts do refresh(part, preset) end
+		local key = string.lower(tostring(name or "box"))
+		key = IconAliases[key] or key
+		loadIcon(key, function(polylines)
+			if root.Parent then drawIcon(root, icon, polylines, size, color) end
+		end)
 	end
 	return icon
 end
@@ -944,12 +1188,33 @@ local function addSlot(item, frame, width, height, gap)
 	return slot
 end
 
+-- Keybind modes: Toggle flips on each press, Hold is active while the key is down, Press fires once per press.
+-- options.Modes limits which modes the right-click menu offers ({ "Press" } = only Press, nil = all of them).
+local ModeOrder = { "Toggle", "Hold", "Press" }
+
+local function allowedModes(list)
+	if type(list) == "string" then list = { list } end
+	if type(list) ~= "table" then return nil end
+	local set, any = {}, false
+	for _, mode in list do
+		if table.find(ModeOrder, mode) then set[mode], any = true, true end
+	end
+	return any and set or nil
+end
+
 local function attachKeybind(section, item, options)
 	local win = section.Window
 	local object = {
-		Key = options.Key, Mode = options.Mode or "Toggle", Listening = false,
+		Key = options.Key, Mode = "Toggle", Modes = allowedModes(options.Modes), Listening = false,
 		OnPress = options.OnPress, OnRelease = options.OnRelease, Name = options.Name,
 	}
+	if table.find(ModeOrder, options.Mode) and (not object.Modes or object.Modes[options.Mode]) then
+		object.Mode = options.Mode
+	elseif object.Modes then
+		for _, mode in ModeOrder do
+			if object.Modes[mode] then object.Mode = mode break end
+		end
+	end
 	local chip, text = makeChip(item.Frame, keyName(object.Key))
 	local button = new("TextButton", { Size = Dim2(1, 0, 1, 0), ZIndex = 2 }, chip)
 	local slot = addSlot(item, chip, 18, Metrics.ChipH, Metrics.Gap + 2)
@@ -970,6 +1235,13 @@ local function attachKeybind(section, item, options)
 	function object:Set(key)
 		object.Key = key
 		object.Refresh()
+	end
+	-- Returns false when the mode does not exist or this keybind does not allow it.
+	function object:SetMode(mode)
+		if not table.find(ModeOrder, mode) or (object.Modes and not object.Modes[mode]) then return false end
+		object.Mode = mode
+		if object.OnModeChanged then fire(object.OnModeChanged, mode) end
+		return true
 	end
 	button.MouseButton1Click:Connect(function()
 		object.Listening = true
@@ -1084,7 +1356,7 @@ local function addInlineControls(section, item, options, name)
 		color = attachColor(section, item, { Default = options.Color, Alpha = options.ColorAlpha, Callback = options.ColorCallback })
 	end
 	if options.Keybind ~= nil then
-		keybind = attachKeybind(section, item, { Key = options.Keybind, Mode = options.KeybindMode, Name = options.KeybindName or name })
+		keybind = attachKeybind(section, item, { Key = options.Keybind, Mode = options.KeybindMode, Modes = options.KeybindModes, Name = options.KeybindName or name })
 	end
 	if options.Gear then gear = attachGear(section, item, options.Name or name) end
 	return keybind, color, gear
@@ -1170,7 +1442,15 @@ function Section:Toggle(options)
 	toggle.Keybind, toggle.Color, toggle.Gear = addInlineControls(self, item, options, hotkeyName)
 	if toggle.Keybind then
 		toggle.Keybind.OnPress = function()
-			if toggle.Keybind.Mode == "Hold" then toggle:Set(true) else toggle:Set(not toggle.Value) end
+			local mode = toggle.Keybind.Mode
+			if mode == "Hold" then
+				toggle:Set(true)
+			elseif mode == "Press" then
+				-- One-shot: the toggle keeps its state. PressCallback runs, or Callback(true) when it is not set.
+				fire(options.PressCallback or toggle.Callback, true)
+			else
+				toggle:Set(not toggle.Value)
+			end
 		end
 		toggle.Keybind.OnRelease = function()
 			if toggle.Keybind.Mode == "Hold" then toggle:Set(false) end
@@ -1205,8 +1485,26 @@ end
 function Section:Keybind(options)
 	local item = self:_item(Metrics.Row, "Keybind", options.Name)
 	item.Label = label(item.Frame, { Text = options.Name, Truncate = Enum.TextTruncate.AtEnd })
-	local object = attachKeybind(self, item, { Key = options.Default, Mode = options.Mode, Name = options.Name, OnPress = options.Callback })
-	object.Item = item
+	local object = attachKeybind(self, item, { Key = options.Default, Mode = options.Mode, Modes = options.Modes, Name = options.Name })
+	object.Item, object.Callback, object.State = item, options.Callback, false
+	-- Callback(state): Press gives true on every press, Toggle flips true/false, Hold gives true on press and false on release.
+	object.OnPress = function()
+		if object.Mode == "Press" then
+			fire(object.Callback, true)
+		elseif object.Mode == "Hold" then
+			object.State = true
+			fire(object.Callback, true)
+		else
+			object.State = not object.State
+			fire(object.Callback, object.State)
+		end
+	end
+	object.OnRelease = function()
+		if object.Mode == "Hold" and object.State then
+			object.State = false
+			fire(object.Callback, false)
+		end
+	end
 	register(self, object, options, item)
 	return object
 end
@@ -2274,7 +2572,7 @@ end
 function Window:_buildResize()
 	local hovering, resizing = 0, false
 	local color = function() return (hovering > 0 or resizing) and Current.InactiveText or Current.Outline end
-	local grip = makeIcon(self.Root, "grip", 12, color, "Tab", { AnchorPoint = Vec2(1, 1), Position = Dim2(1, -2, 1, -2), ZIndex = 15 })
+	local grip = makeIcon(self.Root, "blossom-resize", 12, color, "Tab", { AnchorPoint = Vec2(1, 1), Position = Dim2(1, -2, 1, -2), ZIndex = 15 })
 	local function handle(name, position, size, anchor, axisX, axisY)
 		local button = new("TextButton", { Name = name, AnchorPoint = anchor, Position = position, Size = size, ZIndex = 16 }, self.Root)
 		hoverable(button, function() hovering += 1; grip.Update() end, function() hovering -= 1; grip.Update() end)
@@ -2356,37 +2654,57 @@ function Window:_buildKeybindMenu()
 	local pad, gap, rowH = Metrics.Pad, Metrics.Gap, Metrics.InputH
 	local width = 202
 	local inner = width - pad * 2
-	local half = (inner - gap) / 2
 	local frame, body, controls = self:_popupFrame(width, pad * 2 + rowH * 2 + gap)
 	local menu = { Frame = frame, Fader = newFader(frame), Target = nil }
-	local pill = new("Frame", { Bg = "Accent", Size = Offset(half - 2, rowH - 2), Position = Offset(pad + half + gap + 1, pad + 1), Radius = Metrics.Radius, Border = "Outline" }, body)
+	local pill = new("Frame", { Bg = "Accent", Size = Offset(inner / 3 - 2, rowH - 2), Position = Offset(pad + 1, pad + 1), Radius = Metrics.Radius, Border = "Outline" }, body)
 	addGradient(pill)
-	local onToggle = new("TextButton", { Position = Offset(pad, pad), Size = Offset(half, rowH), ZIndex = 2 }, body)
-	centeredLabel(onToggle, half, { Text = "On Toggle", RowH = rowH })
-	local onHold = new("TextButton", { Position = Offset(pad + half + gap, pad), Size = Offset(half, rowH), ZIndex = 2 }, body)
-	centeredLabel(onHold, half, { Text = "On Hold", RowH = rowH })
-	local reset = new("TextButton", { Position = Offset(pad + 1, pad + rowH + gap + 1), Size = Offset(inner - 2, rowH - 2), Radius = Metrics.Radius, Border = "Outline", BackgroundTransparency = 0 }, body)
+	local buttons = {}
+	for _, mode in ModeOrder do
+		local button = new("TextButton", { Size = Offset(0, rowH), ZIndex = 2 }, body)
+		local text = label(button, { Text = mode, TextSize = 13, RowH = rowH, X = 4, Right = 4, Truncate = Enum.TextTruncate.AtEnd })
+		text.TextXAlignment = Enum.TextXAlignment.Center
+		buttons[mode] = button
+		table.insert(controls, button)
+		button.MouseButton1Click:Connect(function()
+			if menu.Target and menu.Target:SetMode(mode) then menu.Paint(true) end
+		end)
+	end
+	local reset = new("TextButton", { Size = Offset(inner - 2, rowH - 2), Radius = Metrics.Radius, Border = "Outline", BackgroundTransparency = 0 }, body)
 	interactive(reset, "Element")
 	addGradient(reset)
-	table.insert(controls, onToggle)
-	table.insert(controls, onHold)
 	table.insert(controls, reset)
 	local center = floor(inner / 2)
 	makeIcon(reset, "reset", 14, "Text", "Element", { Position = Offset(center - 32, 5) })
 	label(reset, { Text = "Reset", X = center - 12, RowH = rowH - 2, W = 50 })
 
+	-- Only the modes this keybind allows are shown. With a single mode the row is hidden and only Reset remains.
 	function menu.Paint(animated)
 		local target = menu.Target
 		if not target then return end
-		local x = target.Mode == "Hold" and pad + half + gap or pad
-		place(pill, "Position", Offset(x + 1, pad + 1), animated, "Knob")
+		local allowed = {}
+		for _, mode in ModeOrder do
+			buttons[mode].Visible, buttons[mode].Size = false, Offset(0, rowH)
+			if not target.Modes or target.Modes[mode] then table.insert(allowed, mode) end
+		end
+		local count = #allowed
+		local showModes = count > 1
+		local w = showModes and floor((inner - gap * (count - 1)) / count) or 0
+		pill.Visible = showModes
+		for index, mode in allowed do
+			local x = pad + (index - 1) * (w + gap)
+			if showModes then
+				buttons[mode].Visible = true
+				buttons[mode].Position, buttons[mode].Size = Offset(x, pad), Offset(w, rowH)
+			end
+			if mode == target.Mode and showModes then
+				pill.Size = Offset(w - 2, rowH - 2)
+				place(pill, "Position", Offset(x + 1, pad + 1), animated, "Knob")
+			end
+		end
+		local resetY = showModes and pad + rowH + gap or pad
+		reset.Position = Offset(pad + 1, resetY + 1)
+		frame.Size = Offset(width, resetY + rowH + pad)
 	end
-	onToggle.MouseButton1Click:Connect(function()
-		if menu.Target then menu.Target.Mode = "Toggle"; menu.Paint(true) end
-	end)
-	onHold.MouseButton1Click:Connect(function()
-		if menu.Target then menu.Target.Mode = "Hold"; menu.Paint(true) end
-	end)
 	reset.MouseButton1Click:Connect(function()
 		if menu.Target then menu.Target:Set(nil) end
 		self:ClosePopup()
@@ -2792,7 +3110,7 @@ local function applyValue(object, value)
 		object:Set(Color3.fromHex(isTable and value.Color or value), isTable and value.Alpha or nil)
 		object:SetAnimation(isTable and value.Animation or nil)
 	elseif object.Chip then
-		object.Mode = value.Mode or object.Mode
+		if value.Mode then object:SetMode(value.Mode) end
 		local key = nil
 		if value.Key and value.Key ~= "None" and value.Key ~= false then
 			key = string.find(value.Key, "MouseButton", 1, true) and Enum.UserInputType[value.Key] or Enum.KeyCode[value.Key]
@@ -3340,6 +3658,8 @@ function Blossom.new(options)
 		for key, value in Themes[options.Theme] do Current[key] = value end
 	end
 	if options.Font then FontFamily = Fonts[options.Font] or options.Font end
+	if options.IconBase then IconBase = type(options.IconBase) == "table" and options.IconBase or { options.IconBase } end
+	if options.IconStroke then IconStroke = options.IconStroke end
 	local minSize = options.MinSize or Vec2(Metrics.MinWindowW, Metrics.MinWindowH)
 	minSize = Vec2(minSize.X - minSize.X % 2, minSize.Y - minSize.Y % 2)
 	local startSize = options.Size or Vec2(Metrics.WindowW, Metrics.WindowH)
@@ -3541,6 +3861,12 @@ local function keyOf(name)
 	return ok and key or nil
 end
 
+-- Registers your own SVG (the inside of an <svg> tag or a full file, 24x24 grid) under an icon name.
+function Blossom.AddIcon(name, svg)
+	IconSVG[string.lower(name)] = svg
+	IconGeometry[string.lower(name)] = nil
+end
+
 function Window:AddTab(name, icon) return self:Tab({ Name = name, Icon = icon }) end
 function Window:OnUnload(callback) table.insert(self.UnloadCallbacks, callback) end
 Window.Unload = Window.Destroy
@@ -3562,7 +3888,7 @@ local function chainable(section, object)
 	end
 	function object:AddKeyPicker(index, o)
 		local callback = o.Callback
-		local key = attachKeybind(section, object.Item, { Key = keyOf(o.Default), Mode = o.Mode == "Hold" and "Hold" or "Toggle", Name = o.Text or index, OnPress = callback and function() callback(true) end or nil })
+		local key = attachKeybind(section, object.Item, { Key = keyOf(o.Default), Mode = o.Mode, Modes = o.Modes, Name = o.Text or index, OnPress = callback and function() callback(true) end or nil })
 		key.Item = object.Item
 		register(section, key, { Flag = index, Name = o.Text or index }, object.Item)
 		object.Keybind = key

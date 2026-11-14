@@ -1101,6 +1101,7 @@ local function attachGear(section, item, name)
 		Window = win, Tab = section.Tab, Name = section.Name .. "/" .. tostring(name), Popup = popup, Items = {}, Controls = controls,
 		Body = new("Frame", { Position = Offset(Metrics.Pad, 0), Size = Dim2(1, -Metrics.Pad * 2, 1, 0) }, body),
 	}, Gear)
+	table.insert(win.Extras, gear)
 	table.insert(win.ResizeJobs, function() gear:Layout() end)
 	local button = new("TextButton", { Size = Offset(Metrics.Row, Metrics.Row) }, item.Frame)
 	local hovering = false
@@ -1633,11 +1634,12 @@ function Section:Button(options)
 	interactive(button, "Element", "HoveredElement", "Inline")
 	addGradient(button)
 	local armed
-	local text, setWidth = centeredLabel(button, trackWidth(win), {
-		Text = options.Name, TextSize = 13, RowH = Metrics.ButtonH - 2,
+	-- The label spans the whole button and centres itself, so changing the text never moves or re-measures it.
+	local text = label(button, {
+		Text = options.Name, TextSize = 13, RowH = Metrics.ButtonH - 2, X = 6, Right = 6, Truncate = Enum.TextTruncate.AtEnd,
 		Fg = function() return armed and Current.Accent or Current.Text end,
 	})
-	table.insert(win.ResizeJobs, function() setWidth(trackWidth(win)) end)
+	text.TextXAlignment = Enum.TextXAlignment.Center
 	local object = { Item = item, Instance = button, Callback = options.Callback }
 	-- Confirm: the first click only rewrites this button's own label, the second one runs the callback.
 	local confirm = options.Confirm or options.DoubleClick
@@ -1922,6 +1924,7 @@ function Tab:SubTab(options)
 		addGradient(self.Pill)
 	end
 	local sub = setmetatable({ Window = win, Parent = self, Name = self.Name .. "/" .. options.Name, TopH = SUB_H }, SubTab)
+	table.insert(win.Extras, sub)
 	sub.Page = new("Frame", { Name = options.Name, Position = Offset(0, SUB_H), Size = Dim2(1, 0, 1, -SUB_H), Visible = false }, self.Page)
 	buildColumns(win, sub, sub.Page)
 	local width = math.max(60, #options.Name * 7 + 24)
@@ -2761,52 +2764,142 @@ end
 local ConfigMemory = {}
 local function configPath(name) return "Blossom/" .. name .. ".json" end
 
-function Window:_serialize()
-	local data = {}
-	for flag, object in self.Flags do
-		local value = object.Value
-		if object.Swatch then
-			value = { Color = object.Base:ToHex(), Alpha = object.Alpha, Animation = object.Animation ~= "None" and object.Animation or nil }
-		elseif object.Chip then
-			value = { Key = object.Key and object.Key.Name or false, Mode = object.Mode }
-		elseif object.Multi then
-			local list = {}
-			for option, enabled in object.Value do
-				if enabled then table.insert(list, option) end
-			end
-			value = list
-		end
-		if value ~= nil then data[flag] = value end
-	end
-	return HttpService:JSONEncode(data)
+local function jsonKeyLess(a, b)
+	local ua, ub = string.sub(a, 1, 1) == "_", string.sub(b, 1, 1) == "_"
+	if ua ~= ub then return ua end
+	return string.lower(a) < string.lower(b)
 end
 
+-- Human readable JSON: sorted keys, one setting per line, short lists and colours kept on one line.
+local function prettyJson(value, indent)
+	if type(value) ~= "table" then return HttpService:JSONEncode(value) end
+	indent = indent or ""
+	if next(value) == nil then return "[]" end
+	local parts = {}
+	if value[1] ~= nil then
+		for _, item in value do table.insert(parts, prettyJson(item)) end
+		return "[" .. table.concat(parts, ", ") .. "]"
+	end
+	local keys, flat = {}, true
+	for key, item in value do
+		table.insert(keys, key)
+		if type(item) == "table" then flat = false end
+	end
+	table.sort(keys, jsonKeyLess)
+	if flat and #keys <= 4 and #indent >= 2 then -- only single settings (colour, keybind) stay on one line
+		for _, key in keys do table.insert(parts, HttpService:JSONEncode(key) .. ": " .. prettyJson(value[key])) end
+		return "{ " .. table.concat(parts, ", ") .. " }"
+	end
+	local inner = indent .. "\t"
+	for _, key in keys do table.insert(parts, inner .. HttpService:JSONEncode(key) .. ": " .. prettyJson(value[key], inner)) end
+	return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+end
+
+local function roundNumbers(value)
+	if type(value) == "number" then return math.round(value * 10000) / 10000 end
+	if type(value) == "table" then
+		local copy = {}
+		for key, item in value do copy[key] = roundNumbers(item) end
+		return copy
+	end
+	return value
+end
+
+-- What one element looks like in the file: a bool, a number, a string, a list, or a small named object.
+local function encodeValue(object)
+	if object.Swatch then
+		local value = { Color = "#" .. object.Base:ToHex(), Alpha = roundNumbers(object.Alpha) }
+		if object.Animation ~= "None" then value.Animation = object.Animation end
+		return value
+	elseif object.Chip then
+		return { Key = object.Key and object.Key.Name or "None", Mode = object.Mode }
+	elseif object.Multi then
+		local list = {}
+		for option, enabled in object.Value do
+			if enabled then table.insert(list, option) end
+		end
+		table.sort(list)
+		return list
+	end
+	return roundNumbers(object.Value)
+end
+
+local function applyValue(object, value)
+	if object.Swatch then
+		local isTable = type(value) == "table"
+		object:Set(Color3.fromHex(isTable and value.Color or value), isTable and value.Alpha or nil)
+		object:SetAnimation(isTable and value.Animation or nil)
+	elseif object.Chip then
+		object.Mode = value.Mode or object.Mode
+		local key = nil
+		if value.Key and value.Key ~= "None" and value.Key ~= false then
+			key = string.find(value.Key, "MouseButton", 1, true) and Enum.UserInputType[value.Key] or Enum.KeyCode[value.Key]
+		end
+		object:Set(key)
+	else
+		object:Set(value)
+	end
+end
+
+-- Layout: { "Tab": { "Section": { "Element": value } } }. Flags without a Tab/Section/Name path go under "_custom".
+function Window:_snapshot()
+	local data = { _format = "Blossom config", _version = 2 }
+	for flag, object in self.Flags do
+		local value = encodeValue(object)
+		if value ~= nil then
+			local tab, section, name = string.match(flag, "^([^/]+)/([^/]+)/(.+)$")
+			if tab then
+				data[tab] = data[tab] or {}
+				data[tab][section] = data[tab][section] or {}
+				data[tab][section][name] = value
+			else
+				data._custom = data._custom or {}
+				data._custom[flag] = value
+			end
+		end
+	end
+	return data
+end
+
+function Window:ExportConfig()
+	return prettyJson(self:_snapshot())
+end
+
+function Window:_serialize()
+	return self:ExportConfig()
+end
+
+-- Returns (ok, how many settings were applied). Also reads the old flat format.
 function Window:_deserialize(json)
 	local ok, data = pcall(HttpService.JSONDecode, HttpService, json)
-	if not ok or type(data) ~= "table" then return false end
-	self.Quiet = true
-	for flag, value in data do
+	if not ok or type(data) ~= "table" then return false, 0 end
+	local applied = 0
+	local function apply(flag, value)
 		local object = self.Flags[flag]
-		if object then
-			pcall(function()
-				if object.Swatch then
-					object:Set(Color3.fromHex(value.Color), value.Alpha)
-					object:SetAnimation(value.Animation)
-				elseif object.Chip then
-					object.Mode = value.Mode or object.Mode
-					local key = nil
-					if value.Key then
-						key = string.find(value.Key, "MouseButton", 1, true) and Enum.UserInputType[value.Key] or Enum.KeyCode[value.Key]
+		if object and pcall(applyValue, object, value) then applied += 1 end
+	end
+	self.Quiet = true
+	for key, value in data do
+		if string.sub(key, 1, 1) ~= "_" or key == "_custom" then
+			if self.Flags[key] then
+				apply(key, value)
+			elseif type(value) == "table" then
+				for inner, item in value do
+					if key == "_custom" then
+						apply(inner, item)
+					elseif type(item) == "table" then
+						for name, entry in item do apply(key .. "/" .. inner .. "/" .. name, entry) end
 					end
-					object:Set(key)
-				else
-					object:Set(value)
 				end
-			end)
+			end
 		end
 	end
 	self.Quiet = false
-	return true
+	return applied > 0, applied
+end
+
+function Window:ImportConfig(text)
+	return self:_deserialize(text)
 end
 
 function Window:ListConfigs()
@@ -2823,6 +2916,21 @@ function Window:ListConfigs()
 	return names
 end
 
+function Window:SearchConfigs(query)
+	query = string.lower(query or "")
+	if query == "" then return self:ListConfigs() end
+	local found = {}
+	for _, name in self:ListConfigs() do
+		if string.find(string.lower(name), query, 1, true) then table.insert(found, name) end
+	end
+	return found
+end
+
+function Window:GetConfigText(name)
+	if typeof(readfile) == "function" and typeof(isfile) == "function" and isfile(configPath(name)) then return readfile(configPath(name)) end
+	return ConfigMemory[name]
+end
+
 function Window:SaveConfig(name)
 	local json = self:_serialize()
 	if typeof(writefile) == "function" then
@@ -2834,12 +2942,7 @@ function Window:SaveConfig(name)
 end
 
 function Window:LoadConfig(name)
-	local json
-	if typeof(readfile) == "function" and typeof(isfile) == "function" and isfile(configPath(name)) then
-		json = readfile(configPath(name))
-	else
-		json = ConfigMemory[name]
-	end
+	local json = self:GetConfigText(name)
 	if json then return self:_deserialize(json) end
 	return false
 end
@@ -2949,27 +3052,30 @@ function Window:BuildSettings(tab)
 	local menu = tab:Section({ Name = "Menu", Icon = "cube", Side = 1 })
 	local menuBind = menu:Keybind({ Name = "Menu Key", Default = self.MenuKey, NoSave = true })
 	menuBind.OnKeyChanged = function() self.MenuKey = menuBind.Key end
-	local watermark = menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Gear = true, Callback = function(value) self.Watermark.Visible = value end })
-	watermark.Gear:Dropdown({ Name = "Show", Options = WatermarkOptions, Default = WatermarkDefaults, Multi = true, MaxRows = #WatermarkOptions, NoSave = true, Callback = function(set) self:SetWatermarkItems(set) end })
-	menu:Toggle({ Name = "Hotkey List", Default = true, NoSave = true, Callback = function(value) self.Hotkeys.Visible = value end })
-	menu:Toggle({ Name = "Sounds", Default = self.Sounds, NoSave = true, Callback = function(value)
+	local watermark = menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Gear = true, Callback = function(value) self:_fadeOverlay(self.Watermark, value) end })
+	watermark.Gear:Dropdown({ Name = "Show", Options = WatermarkOptions, Default = WatermarkDefaults, Multi = true, MaxRows = #WatermarkOptions, Callback = function(set) self:SetWatermarkItems(set) end })
+	menu:Toggle({ Name = "Hotkey List", Default = true, Callback = function(value) self:_fadeOverlay(self.Hotkeys, value) end })
+	menu:Toggle({ Name = "Sounds", Default = self.Sounds, Callback = function(value)
 		self.Sounds = value
 		if value then loadSounds() end
 	end })
 	local fontName = "Inter"
 	for name, family in Fonts do if family == FontFamily then fontName = name end end
-	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, NoSave = true, Callback = function(value) self:SetFont(value) end })
-	menu:Dropdown({ Name = "Text Weight", Options = WeightOrder, Default = BodyWeight.Name, NoSave = true, Callback = function(value) self:SetTextWeight(value) end })
+	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, Callback = function(value) self:SetFont(value) end })
+	menu:Dropdown({ Name = "Text Weight", Options = WeightOrder, Default = BodyWeight.Name, Callback = function(value) self:SetTextWeight(value) end })
 	menu:Button({ Name = "Unload", Confirm = true, Callback = function() self:Destroy() end })
 	local profiles = tab:Section({ Name = "Profiles", Icon = "cube", Side = 1 })
 	profiles:Label({ Name = "Configs" })
+	local searchBox = profiles:Textbox({ Placeholder = "Search configs", NoSave = true })
 	local listbox = profiles:Listbox({ Height = 177, Empty = "No configs yet", Options = self:ListConfigs(), Callback = function(value) selected = value end })
 	local nameBox = profiles:Textbox({ Placeholder = "Config name", NoSave = true })
 	local function refreshList()
-		local names = self:ListConfigs()
-		listbox:SetOptions(names)
-		autoloadList:SetOptions(names)
+		listbox:SetOptions(self:SearchConfigs(searchBox.Instance.Text))
+		autoloadList:SetOptions(self:ListConfigs())
 	end
+	searchBox.Instance:GetPropertyChangedSignal("Text"):Connect(function()
+		listbox:SetOptions(self:SearchConfigs(searchBox.Instance.Text))
+	end)
 	profiles:Button({ Name = "Create", Callback = function()
 		local name = cleanName(nameBox.Instance.Text)
 		if name == "" then self:Notify({ Text = "Enter a config name first." }); return end
@@ -2995,6 +3101,26 @@ function Window:BuildSettings(tab)
 			self:SaveConfig(selected)
 			self:Notify(('Overwrote "%s".'):format(selected))
 		end
+	end })
+	local importBox = profiles:Textbox({ Placeholder = "Paste config JSON", NoSave = true })
+	profiles:Button({ Name = "Export", Callback = function()
+		local copy = setclipboard or toclipboard
+		if typeof(copy) ~= "function" then self:Notify({ Text = "Clipboard is not available here." }); return end
+		copy(selected and self:GetConfigText(selected) or self:ExportConfig())
+		self:Notify(selected and ('Copied "%s" to the clipboard.'):format(selected) or "Copied the current settings to the clipboard.")
+	end })
+	profiles:Button({ Name = "Import", Callback = function()
+		local text = importBox.Instance.Text
+		if text == "" and typeof(getclipboard) == "function" then text = getclipboard() end
+		local ok, count = self:ImportConfig(text)
+		if not ok then self:Notify({ Text = "That is not a valid Blossom config." }); return end
+		importBox:Set("", true)
+		local name = cleanName(nameBox.Instance.Text)
+		if name ~= "" then
+			self:SaveConfig(name)
+			refreshList()
+		end
+		self:Notify(("Imported %d settings."):format(count))
 	end })
 
 	local function storeAutoload() writeAutoload(autoloadOn and autoloadName or nil) end
@@ -3182,6 +3308,19 @@ function Window:_buildHotkeys()
 	self:_makeDraggable(head, holder)
 end
 
+-- The watermark and hotkey list fade in and out with the same Fader as the window.
+function Window:_fadeOverlay(frame, show)
+	self.OverlayWanted[frame] = show
+	if not self.OverlayReady or (self.OverlayState[frame] == true) == show then return end
+	self.OverlayState[frame] = show
+	local fader = self.OverlayFaders[frame]
+	if not fader then
+		fader = newFader(frame)
+		self.OverlayFaders[frame] = fader
+	end
+	if show then fader:Show() else fader:Hide() end
+end
+
 -- Everything anchored to the screen is placed at whole pixels, the main defence against blurry text.
 function Window:_placeOverlays()
 	local size = self.Screen.AbsoluteSize
@@ -3193,7 +3332,23 @@ function Window:_placeOverlays()
 	if self.Hotkeys and not self.Moved[self.Hotkeys] then self.Hotkeys.Position = Offset(14, floor((size.Y - 300) / 2)) end
 end
 
+-- After Destroy every object answers every call with a harmless "ghost", so late callbacks, delayed
+-- tasks or a forgotten Window:Notify never error. Window.Destroyed (or Window:IsDestroyed()) tells them apart.
+local Ghost
+Ghost = setmetatable({}, { __index = function() return Ghost end, __call = function() return Ghost end })
+local DeadMeta = {
+	__index = function(_, key)
+		if key == "Destroyed" then return true end
+		if key == "IsDestroyed" then return function() return true end end
+		return Ghost
+	end,
+}
+
+function Window:IsDestroyed() return self.Destroyed == true end
+
 function Window:Destroy()
+	if self.Destroyed then return end
+	self.Destroyed = true
 	for _, callback in self.UnloadCallbacks do pcall(callback) end
 	for _, connection in self.Connections do connection:Disconnect() end
 	table.clear(Jobs)
@@ -3208,6 +3363,12 @@ function Window:Destroy()
 	if Focus == self then Focus = nil end
 	if ScreenRef == self.Screen then ScreenRef = nil end
 	self.Screen:Destroy()
+	for _, list in { self.Tabs, self.Sections, self.Extras } do
+		for _, object in list do
+			if type(object) == "table" then setmetatable(object, DeadMeta) end
+		end
+	end
+	setmetatable(self, DeadMeta)
 end
 
 local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = Metrics, Fonts = Fonts }
@@ -3235,6 +3396,7 @@ function Blossom.new(options)
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		Visible = true, ThemeName = options.Theme or "Blossom", MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {}, Sounds = options.Sounds ~= false,
+		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 	}, Window)
 	ensureLoop()
 	LastWindow, Focus = win, win
@@ -3401,8 +3563,8 @@ function Blossom.new(options)
 	task.defer(function()
 		if win.Screen.Parent == nil then return end
 		win:SetVisible(true)
-		newFader(win.Watermark):Show()
-		newFader(win.Hotkeys):Show()
+		win.OverlayReady = true
+		for _, frame in { win.Watermark, win.Hotkeys } do win:_fadeOverlay(frame, win.OverlayWanted[frame] ~= false) end
 	end)
 
 	return win

@@ -17,7 +17,6 @@
 	Every element returns an object with .Value and :Set(value, silent).
 
 	Confirm:    Section:Button({ Name = "Unload", Confirm = true, Callback = ... }) - first click turns the label into "Are you sure?".
-	Sounds:     toggles play module_enable.ogg / module_disable.ogg (Blossom.new option Sounds = false, per toggle Sound = false).
 	Sub-tabs:   local Players = Tab:SubTab({ Name = "Players" }); Players:Section({ Name = "ESP", Side = 1 })
 	Gear:       local t = Section:Toggle({ Name = "Enabled", Gear = true }); t.Gear:Slider({ Name = "Hit Chance", ... })
 	Obsidian style: Window:AddTab, Tab:AddGroupbox, Groupbox:AddToggle("Index", { Text = ... }), Window.Toggles / Window.Options
@@ -31,7 +30,6 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
-local SoundService = game:GetService("SoundService")
 
 local INTER = "rbxassetid://12187365364"
 local Vec2, Dim2 = Vector2.new, UDim2.new
@@ -134,43 +132,8 @@ local Casing = "Normal"
 local FontFamily = INTER
 local BodyWeight = Enum.FontWeight.SemiBold
 
--- Sounds are downloaded once into Blossom/sounds and played through getcustomasset.
-local SOUND_BASE = "https://raw.githubusercontent.com/xolylol/Blossom/main/sounds/"
-local SoundFiles = { On = "module_enable.ogg", Off = "module_disable.ogg" }
-local SoundIds, SoundsLoading = {}, false
 local WatermarkOptions = { "Script", "Build", "Name", "FPS", "Ping", "Time", "Session" }
 local WatermarkDefaults = { "Script", "Build", "Name", "FPS", "Ping" }
-
-local function loadSounds()
-	if SoundsLoading or typeof(getcustomasset) ~= "function" or typeof(writefile) ~= "function" or typeof(isfile) ~= "function" then return end
-	SoundsLoading = true
-	for key, file in SoundFiles do
-		task.spawn(function()
-			pcall(function()
-				local path = "Blossom/sounds/" .. file
-				if not isfile(path) then
-					pcall(makefolder, "Blossom")
-					pcall(makefolder, "Blossom/sounds")
-					local data = game:HttpGet(SOUND_BASE .. file)
-					if string.sub(data, 1, 4) ~= "OggS" then return end
-					writefile(path, data)
-				end
-				SoundIds[key] = getcustomasset(path)
-			end)
-		end)
-	end
-end
-
-local function playSound(win, key)
-	local id = SoundIds[key]
-	if not id or not win.Sounds or win.Quiet then return end
-	local sound = Instance.new("Sound")
-	sound.SoundId, sound.Volume = id, 0.5
-	sound.Parent = SoundService
-	sound.Ended:Once(function() sound:Destroy() end)
-	task.delay(6, function() sound:Destroy() end)
-	sound:Play()
-end
 
 -------------------------------------------------------------------------------
 -- Animator: one render-step loop driving springs. Retargeting keeps velocity,
@@ -1191,7 +1154,6 @@ function Section:Toggle(options)
 		toggle.Value = value
 		render(true)
 		syncHotkey()
-		if not silent and options.Sound ~= false then playSound(win, value and "On" or "Off") end
 		if not silent then fire(toggle.Callback, value) end
 	end
 
@@ -2878,7 +2840,6 @@ function Window:_deserialize(json)
 		local object = self.Flags[flag]
 		if object and pcall(applyValue, object, value) then applied += 1 end
 	end
-	self.Quiet = true
 	for key, value in data do
 		if string.sub(key, 1, 1) ~= "_" or key == "_custom" then
 			if self.Flags[key] then
@@ -2894,7 +2855,6 @@ function Window:_deserialize(json)
 			end
 		end
 	end
-	self.Quiet = false
 	return applied > 0, applied
 end
 
@@ -3055,10 +3015,6 @@ function Window:BuildSettings(tab)
 	local watermark = menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Gear = true, Callback = function(value) self:_fadeOverlay(self.Watermark, value) end })
 	watermark.Gear:Dropdown({ Name = "Show", Options = WatermarkOptions, Default = WatermarkDefaults, Multi = true, MaxRows = #WatermarkOptions, Callback = function(set) self:SetWatermarkItems(set) end })
 	menu:Toggle({ Name = "Hotkey List", Default = true, Callback = function(value) self:_fadeOverlay(self.Hotkeys, value) end })
-	menu:Toggle({ Name = "Sounds", Default = self.Sounds, Callback = function(value)
-		self.Sounds = value
-		if value then loadSounds() end
-	end })
 	local fontName = "Inter"
 	for name, family in Fonts do if family == FontFamily then fontName = name end end
 	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, Callback = function(value) self:SetFont(value) end })
@@ -3395,12 +3351,11 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		Visible = true, ThemeName = options.Theme or "Blossom", MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
-		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {}, Sounds = options.Sounds ~= false,
+		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 	}, Window)
 	ensureLoop()
 	LastWindow, Focus = win, win
-	if win.Sounds then loadSounds() end
 	Blossom.Options, Blossom.Toggles = win.Options, win.Toggles
 	if globalEnv then globalEnv.__BlossomWindow = win end
 

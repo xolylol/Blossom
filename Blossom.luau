@@ -112,6 +112,123 @@ local Themes = {
 	},
 }
 local ThemeOrder = { "Blossom", "Afterglow", "Frostbite", "Volt", "Obsidian", "Sakura Drift", "Neon Mirage", "Copper Dust", "Abyss", "Porcelain", "Graphite" }
+-- Built-in themes defined as JSON (same hex format as saved/exported theme files).
+-- Blossom.AddThemeJSON(name, json) registers more; duplicates (same name or same colours) are skipped.
+local BuiltInThemeJSON = {
+	{ "Necro", [[
+{
+    "Background": "1c1824",
+    "Tab": "16121d",
+    "Outline": "3a304a",
+    "Inline": "251f30",
+    "Text": "ece8f4",
+    "InactiveText": "827896",
+    "Accent": "78d6a0",
+    "Element": "221d2d",
+    "Gradient": "a8a6b0",
+    "Shadow": "000000",
+    "HoveredElement": "383048"
+}
+]] },
+	{ "Crypt", [[
+{
+    "Background": "181c22",
+    "Tab": "12161c",
+    "Outline": "303a46",
+    "Inline": "1f252d",
+    "Text": "e6ecf0",
+    "InactiveText": "768492",
+    "Accent": "68c4c8",
+    "Element": "1c222a",
+    "Gradient": "a4aab0",
+    "Shadow": "000000",
+    "HoveredElement": "2e3945"
+}
+]] },
+	{ "Grave Moss", [[
+{
+    "Background": "181e1a",
+    "Tab": "121814",
+    "Outline": "2e3c32",
+    "Inline": "1e2621",
+    "Text": "e8f0e6",
+    "InactiveText": "788a7a",
+    "Accent": "9ed068",
+    "Element": "1c241f",
+    "Gradient": "a6aea6",
+    "Shadow": "000000",
+    "HoveredElement": "2e3c32"
+}
+]] },
+	{ "Wraith", [[
+{
+    "Background": "1e1b28",
+    "Tab": "181521",
+    "Outline": "3e3856",
+    "Inline": "282436",
+    "Text": "eeeaf8",
+    "InactiveText": "8880a2",
+    "Accent": "ac8eec",
+    "Element": "242032",
+    "Gradient": "aaa8b4",
+    "Shadow": "000000",
+    "HoveredElement": "3c3652"
+}
+]] },
+	{ "Blood Moon", [[
+{
+    "Background": "22181c",
+    "Tab": "1c1216",
+    "Outline": "442e36",
+    "Inline": "2c1f24",
+    "Text": "f4e8ea",
+    "InactiveText": "92787e",
+    "Accent": "de5c70",
+    "Element": "281c21",
+    "Gradient": "b0a6a8",
+    "Shadow": "000000",
+    "HoveredElement": "463038"
+}
+]] },
+}
+
+local function themeFromJSON(json)
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, json)
+	if not ok or type(data) ~= "table" then return nil end
+	local theme, found = table.clone(Themes.Blossom), 0
+	for key, hex in data do
+		if theme[key] ~= nil and type(hex) == "string" then
+			local valid, color = pcall(Color3.fromHex, hex)
+			if valid then theme[key], found = color, found + 1 end
+		end
+	end
+	return found > 0 and theme or nil
+end
+
+local function sameTheme(a, b)
+	for key, color in a do
+		if b[key] ~= color then return false end
+	end
+	return true
+end
+
+-- Returns true when the theme was added; false for bad JSON, a taken name or a palette that already exists.
+-- front = true puts it at the top of the Theme list.
+local function addThemeJSON(name, json, front)
+	if type(name) ~= "string" or name == "" or Themes[name] then return false end
+	local theme = themeFromJSON(json)
+	if not theme then return false end
+	for _, existing in Themes do
+		if sameTheme(theme, existing) then return false end
+	end
+	Themes[name] = theme
+	table.insert(ThemeOrder, front and 1 or #ThemeOrder + 1, name)
+	return true
+end
+
+for index = #BuiltInThemeJSON, 1, -1 do
+	addThemeJSON(BuiltInThemeJSON[index][1], BuiltInThemeJSON[index][2], true)
+end
 local ThemeKeys = {
 	{ "Background", "Background" }, { "Tab", "Tab" }, { "Outline", "Outline" }, { "Inline", "Inline" },
 	{ "Text", "Text" }, { "Inactive Text", "InactiveText" }, { "Accent", "Accent" }, { "Element", "Element" },
@@ -2883,7 +3000,9 @@ function Window:_buildPicker()
 	function picker.Sync(keepAnimation)
 		local target = picker.Target
 		if not target then return end
-		local h, s, v = target.Base:ToHSV()
+		-- While Rainbow/Pulse runs the knobs follow the live colour instead of the stored base.
+		local source = (keepAnimation and target.Animation ~= "None") and target.Value or target.Base
+		local h, s, v = source:ToHSV()
 		if s > 0 and v > 0 then picker.H = h end
 		picker.S, picker.V, picker.Alpha = s, v, target.Alpha or 0
 		paint()
@@ -3796,7 +3915,7 @@ function Window:Destroy()
 	setmetatable(self, DeadMeta)
 end
 
-local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = Metrics, Fonts = Fonts }
+local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = Metrics, Fonts = Fonts, AddThemeJSON = function(name, json, front) return addThemeJSON(name, json, front) end }
 
 local LastWindow
 

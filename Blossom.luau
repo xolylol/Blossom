@@ -2780,11 +2780,17 @@ function Window:_makeDraggable(handle, target, allowed)
 		if not isClick(input) then return end
 		local start, origin = mousePos(), target.Position
 		if allowed and not allowed(start) then return end
+		-- A blurred UIShadow is re-rendered every frame while its window moves, which is what drops FPS; hide it during the drag.
+		local shadow = handle:FindFirstChildOfClass("UIShadow")
+		local shadowAlpha = shadow and shadow.Transparency
 		beginDrag(function(point)
 			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
+			if shadow and shadow.Transparency ~= 1 then shadow.Transparency = 1 end
 			animate(target, "Position", self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y), "Follow")
+		end, function()
+			if shadow and shadow.Parent then shadow.Transparency = shadowAlpha end
 		end)
 	end)
 end

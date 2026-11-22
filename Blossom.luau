@@ -229,6 +229,15 @@ end
 for index = #BuiltInThemeJSON, 1, -1 do
 	addThemeJSON(BuiltInThemeJSON[index][1], BuiltInThemeJSON[index][2], true)
 end
+
+-- Blood Moon is the default theme and sits at the top of the list.
+do
+	local index = table.find(ThemeOrder, "Blood Moon")
+	if index then
+		table.remove(ThemeOrder, index)
+		table.insert(ThemeOrder, 1, "Blood Moon")
+	end
+end
 local ThemeKeys = {
 	{ "Background", "Background" }, { "Tab", "Tab" }, { "Outline", "Outline" }, { "Inline", "Inline" },
 	{ "Text", "Text" }, { "Inactive Text", "InactiveText" }, { "Accent", "Accent" }, { "Element", "Element" },
@@ -248,7 +257,7 @@ local Fonts = {
 local FontOrder = { "Inter", "Builder Sans", "Roboto", "Montserrat", "Source Sans Pro", "Ubuntu", "Nunito", "Arimo" }
 local WeightOrder = { "Regular", "Medium", "SemiBold", "Bold" }
 
-local Current = table.clone(Themes.Blossom)
+local Current = table.clone(Themes["Blood Moon"] or Themes.Blossom)
 local Casing = "Normal"
 local FontFamily = INTER
 local BodyWeight = Enum.FontWeight.SemiBold
@@ -3950,7 +3959,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, ThemeName = options.Theme or "Blossom", MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 	}, Window)

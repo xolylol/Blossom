@@ -1458,13 +1458,15 @@ local Gear = setmetatable({}, { __index = Section })
 Gear.__index = Gear
 
 function Gear:Layout()
-	local y = Metrics.Pad
+	local y, any = Metrics.Pad, false
 	for _, item in self.Items do
-		item.Y = y
-		item.Frame.Position = Offset(0, y)
-		y += item.Height + Metrics.Gap
+		if item.Visible ~= false then
+			item.Y, any = y, true
+			item.Frame.Position = Offset(0, y)
+			y += item.Height + Metrics.Gap
+		end
 	end
-	local height = #self.Items > 0 and y - Metrics.Gap + Metrics.Pad or Metrics.Pad * 2
+	local height = any and y - Metrics.Gap + Metrics.Pad or Metrics.Pad * 2
 	self.Popup.Frame.Size = Offset(self.Window.ColumnW, height)
 end
 

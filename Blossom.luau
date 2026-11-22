@@ -3584,7 +3584,7 @@ function Window:BuildSettings(tab)
 			if token == dpiToken then self:SetDPI(value / 100) end
 		end)
 	end })
-	menu:Button({ Name = "Unload", Confirm = true, Callback = function() self:Destroy() end })
+	if not self.HideUnload then menu:Button({ Name = "Unload", Confirm = true, Callback = function() self:Destroy() end }) end
 	local profiles = tab:Section({ Name = "Profiles", Icon = "cube", Side = 1 })
 	profiles:Label({ Name = "Configs" })
 	local searchBox = profiles:Textbox({ Placeholder = "Search configs", NoSave = true })
@@ -3959,7 +3959,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 	}, Window)

@@ -3924,7 +3924,7 @@ function Window:Destroy()
 	setmetatable(self, DeadMeta)
 end
 
-local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = Metrics, Fonts = Fonts, AddThemeJSON = function(name, json, front) return addThemeJSON(name, json, front) end }
+local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = Metrics, Fonts = Fonts, AddThemeJSON = function(name, json, front) return addThemeJSON(name, json, front) end, GetThemeColor = function(key) return Current[key] end }
 
 local LastWindow
 

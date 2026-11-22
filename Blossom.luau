@@ -599,7 +599,30 @@ local Shadows = {
 -- UIShadow is still rolling out, so clients without it simply draw no shadow.
 local ShadowsAvailable = pcall(function() Instance.new("UIShadow"):Destroy() end)
 
+-- The window glow is stacked soft frames behind the window, not a live UIShadow: a blurred UIShadow is
+-- re-rendered every frame while the window moves, which is what dropped FPS during dragging.
+local GlowLayers = 5
+
+local function addGlow(inst)
+	local parent = inst.Parent
+	if not parent then return nil end
+	local corner = inst:FindFirstChildOfClass("UICorner")
+	local radius = corner and corner.CornerRadius.Offset or 0
+	local layers = {}
+	for index = GlowLayers, 1, -1 do
+		local grow = index * 2
+		local layer = new("Frame", {
+			Name = "Glow", Bg = "Shadow", BackgroundTransparency = 0.93, Radius = radius + grow,
+			Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2), ZIndex = inst.ZIndex - 1,
+		}, parent)
+		layer.Active = false
+		table.insert(layers, layer)
+	end
+	return layers
+end
+
 local function addShadow(inst, style)
+	if style == "Large" then return addGlow(inst) end
 	if not ShadowsAvailable then return nil end
 	local preset = Shadows[style]
 	local shadow = Instance.new("UIShadow")
@@ -2780,17 +2803,11 @@ function Window:_makeDraggable(handle, target, allowed)
 		if not isClick(input) then return end
 		local start, origin = mousePos(), target.Position
 		if allowed and not allowed(start) then return end
-		-- A blurred UIShadow is re-rendered every frame while its window moves, which is what drops FPS; hide it during the drag.
-		local shadow = handle:FindFirstChildOfClass("UIShadow")
-		local shadowAlpha = shadow and shadow.Transparency
 		beginDrag(function(point)
 			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
-			if shadow and shadow.Transparency ~= 1 then shadow.Transparency = 1 end
 			animate(target, "Position", self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y), "Follow")
-		end, function()
-			if shadow and shadow.Parent then shadow.Transparency = shadowAlpha end
 		end)
 	end)
 end

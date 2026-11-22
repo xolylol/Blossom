@@ -3319,6 +3319,60 @@ function Window:SaveTheme(name)
 	if not table.find(ThemeOrder, name) then table.insert(ThemeOrder, name) end
 end
 
+-- Theme JSON uses the same simple hex-colour format as saved theme files.
+-- Supplying a name exports that saved theme; omitting it exports the active theme.
+function Window:ExportTheme(name)
+	local theme = name and Themes[name] or Current
+	if not theme then return nil end
+	local data = {}
+	for key in Current do
+		local color = theme[key]
+		if typeof(color) == "Color3" then data[key] = color:ToHex() end
+	end
+	return HttpService:JSONEncode(data)
+end
+
+-- Imports a theme JSON string, applies it, and optionally saves it under name.
+-- Returns false for invalid JSON or a payload with no recognised theme colours.
+function Window:ImportTheme(json, name)
+	if type(json) ~= "string" or json == "" then return false, 0 end
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, json)
+	if not ok or type(data) ~= "table" then return false, 0 end
+
+	local theme = table.clone(Current)
+	local applied = 0
+	for key, hex in data do
+		if theme[key] ~= nil and type(hex) == "string" then
+			local valid, color = pcall(Color3.fromHex, hex)
+			if valid then
+				theme[key] = color
+				applied += 1
+			end
+		end
+	end
+	if applied == 0 then return false, 0 end
+
+	local themeName = cleanName(name or "")
+	if themeName ~= "" then
+		if Themes[themeName] and not UserThemes[themeName] then return false, 0 end
+		Themes[themeName], UserThemes[themeName] = theme, true
+		if not table.find(ThemeOrder, themeName) then table.insert(ThemeOrder, themeName) end
+		self.ThemeName = themeName
+	else
+		self.ThemeName = "Custom"
+	end
+
+	for key, color in theme do Current[key] = color end
+	for inst in Bound do refresh(inst, "Soft") end
+	for _, row in self.ThemeRows do row.Color:Set(Current[row.Key], nil, true) end
+	if themeName ~= "" then
+		self:SaveTheme(themeName)
+	else
+		self.ThemeName = "Custom"
+	end
+	return true, applied
+end
+
 -- apply = false only registers the theme so it shows up in the Theme list.
 function Window:LoadTheme(name, apply)
 	local path, json = THEME_DIR .. "/" .. name .. ".json", nil
@@ -3518,6 +3572,38 @@ function Window:BuildSettings(tab)
 		themeList:Set(nil, true)
 		refreshThemes()
 		self:Notify(('Deleted theme "%s".'):format(name))
+	end })
+
+	local themeImportBox = theming:Textbox({ Placeholder = "Paste theme JSON", NoSave = true })
+	theming:Button({ Name = "Export Theme JSON", Callback = function()
+		local name = themeList.Value
+		local json = self:ExportTheme(name)
+		local copy = setclipboard or toclipboard
+		if typeof(copy) ~= "function" then self:Notify("Clipboard is not available here."); return end
+		if not json then self:Notify("Select a saved theme or use the active theme."); return end
+		local ok = pcall(copy, json)
+		if ok then
+			self:Notify(name and ('Copied theme "%s" JSON.'):format(name) or "Copied the active theme JSON.")
+		else
+			self:Notify("Could not copy theme JSON.")
+		end
+	end })
+	theming:Button({ Name = "Import Theme JSON", Callback = function()
+		local json = themeImportBox.Instance.Text
+		if json == "" and typeof(getclipboard) == "function" then
+			local ok, value = pcall(getclipboard)
+			if ok and type(value) == "string" then json = value end
+		end
+		local name = cleanName(themeName.Instance.Text)
+		local ok, count = self:ImportTheme(json, name)
+		if not ok then self:Notify("That is not a valid Blossom theme JSON."); return end
+		themeImportBox:Set("", true)
+		refreshThemes()
+		if name ~= "" then
+			themeList:Set(name, true)
+			themeDropdown:Set(name, true)
+		end
+		self:Notify(("Imported %d theme colours."):format(count))
 	end })
 
 	if saved then

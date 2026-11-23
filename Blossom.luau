@@ -1669,6 +1669,8 @@ function Section:Keybind(options)
 	-- Callback(state): Press gives true on every press, Toggle flips true/false, Hold gives true on press and false on release.
 	object.OnPress = function()
 		if object.Mode == "Press" then
+			local entry = self.Window.HotkeyEntries[object]
+			if entry then entry.Pulse() end
 			fire(object.Callback, true)
 		elseif object.Mode == "Hold" then
 			object.State = true
@@ -1685,6 +1687,7 @@ function Section:Keybind(options)
 		end
 	end
 	register(self, object, options, item)
+	if options.Hotkey ~= false then self.Window:RegisterHotkey(object, nil) end
 	return object
 end
 
@@ -2521,23 +2524,26 @@ function Window:RegisterHotkey(object, toggle)
 	local entry = { Object = object, Toggle = toggle, Flash = false, Shown = false }
 	local frame = new("Frame", { Bg = "Background", Size = Offset(140, HK_H), Radius = Metrics.FloatRadius, Border = "Outline", Visible = false }, self.Hotkeys)
 	entry.Frame = frame
-	local function isActive() return toggle and toggle.Value or entry.Flash end
-	local function usesSwitch() return toggle ~= nil and object.Mode ~= "Press" end
-
-	new("Frame", { Bg = function() return isActive() and Current.Accent or Current.Outline end, Position = Offset(1, 6), Size = Offset(2, 14), Radius = Metrics.SmallRadius }, frame).Name = "Bar"
-	local bar = frame.Bar
+	local function isOn()
+		if toggle then return toggle.Value == true end
+		return object.State == true
+	end
+	local function usesSwitch() return object.Mode ~= "Press" end
+	local function isActive()
+		if object.Mode == "Press" then return entry.Flash end
+		return isOn()
+	end
 
 	-- Always switch
 	local track = new("Frame", {
-		Bg = function() return toggle and toggle.Always and Current.Accent or Current.Element end,
+		Bg = function() return isOn() and Current.Accent or Current.Element end,
 		Position = Offset(11, 6), Size = Offset(Metrics.ToggleW - 2, Metrics.ToggleH - 2), Radius = FULL, Border = "Outline",
 	}, frame)
 	addGradient(track)
 	local knob = new("Frame", {
-		Bg = function() return toggle and toggle.Always and Current.Text or Current.InactiveText end,
+		Bg = function() return isOn() and Current.Text or Current.InactiveText end,
 		Size = Offset(Metrics.ToggleKnob, Metrics.ToggleKnob), Position = Offset(2, 2), Radius = FULL,
 	}, track)
-	local hit = new("TextButton", { Position = Offset(6, 0), Size = Offset(Metrics.ToggleW + 10, HK_H), ZIndex = 3 }, frame)
 
 	-- Press dot
 	local dot = new("Frame", {
@@ -2563,12 +2569,12 @@ function Window:RegisterHotkey(object, toggle)
 
 	function entry.Update(animated)
 		local sw = usesSwitch()
-		track.Visible, hit.Visible, dot.Visible = sw, sw, not sw
-		setText(caption, keyName(object.Key) .. " \u{00B7} " .. tostring(object.Mode))
-		local x = (toggle and toggle.Always) and (Metrics.ToggleW - 2 - Metrics.ToggleKnob - 2) or 2
+		track.Visible, dot.Visible = sw, not sw
+		setText(caption, keyName(object.Key))
+		local x = isOn() and (Metrics.ToggleW - 2 - Metrics.ToggleKnob - 2) or 2
 		place(knob, "Position", Offset(x, 2), animated, "Knob")
 		local preset = animated and "Fast" or false
-		for _, inst in { track, knob, dot, bar, text } do refresh(inst, preset) end
+		for _, inst in { track, knob, dot, text } do refresh(inst, preset) end
 		layout()
 	end
 	function entry.Pulse()
@@ -2580,10 +2586,17 @@ function Window:RegisterHotkey(object, toggle)
 		end)
 	end
 
-	hit.MouseButton1Click:Connect(function()
-		if toggle and toggle.SetAlways then toggle:SetAlways(not toggle.Always) end
-	end)
-	hoverable(hit, function() track.BackgroundTransparency = 0.15 end, function() track.BackgroundTransparency = 0 end)
+	-- Follows key / mode / state changes of the bind by itself, whoever changes them.
+	local lastKey, lastMode, lastOn = object.Key, object.Mode, isOn()
+	table.insert(self.Connections, RunService.Heartbeat:Connect(function()
+		if not frame.Parent then return end
+		local on = isOn()
+		if object.Key ~= lastKey or object.Mode ~= lastMode or on ~= lastOn then
+			lastKey, lastMode, lastOn = object.Key, object.Mode, on
+			entry.Update(true)
+			self:_layoutHotkeys()
+		end
+	end))
 
 	self.HotkeyEntries[object] = entry
 	table.insert(self.HotkeyOrder, object)
@@ -3685,7 +3698,7 @@ function Window:BuildSettings(tab)
 	local autoloadOn, autoloadName = saved ~= nil, saved
 	local autoloadList
 	local menu = tab:Section({ Name = "Menu", Icon = "cube", Side = 1 })
-	local menuBind = menu:Keybind({ Name = "Menu Key", Default = self.MenuKey, NoSave = true })
+	local menuBind = menu:Keybind({ Name = "Menu Key", Default = self.MenuKey, NoSave = true, Hotkey = false })
 	menuBind.OnKeyChanged = function() self.MenuKey = menuBind.Key end
 	local watermark = menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Gear = true, Callback = function(value) self:_fadeOverlay(self.Watermark, value) end })
 	watermark.Gear:Dropdown({ Name = "Show", Options = WatermarkOptions, Default = WatermarkDefaults, Multi = true, MaxRows = #WatermarkOptions, Callback = function(set) self:SetWatermarkItems(set) end })

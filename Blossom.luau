@@ -26,6 +26,10 @@
 	            Downloaded from GitHub on first use and cached in Blossom/icons. Blossom.AddIcon(name, svg) adds your own.
 	            Blossom.new options: IconBase (another URL folder with <name>.svg), IconStroke (default 2).
 
+	Hotkey list: lists every bind (also unassigned ones). Blossom.new options HotkeyOnlyAssigned = true (hide binds without a key)
+	and HotkeyOnlyEnabled = true (show only binds that are on). Both can be changed in Menu > Hotkey List > gear,
+	or from code: Window:SetHotkeyFilter(onlyAssigned, onlyEnabled).
+
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
 	Size and MinSize (Vector2), Resizable (default true). Window:SetSize(width, height) resizes from code.
 ]]
@@ -2494,13 +2498,20 @@ end
 
 local HK_H, HK_FIRST, HK_PITCH, HK_NAME_X = 26, 33, 31, 46
 
--- Re-sorts the visible rows. Rows without a key are hidden.
+-- A bind counts as assigned when the player has set a real key on it.
+local function hotkeyAssigned(object)
+	return object.Key ~= nil and object.Key ~= Enum.KeyCode.Unknown
+end
+
+-- Re-sorts the visible rows and applies the "only assigned" / "only enabled" filters.
 function Window:_layoutHotkeys()
 	local row = 0
 	for _, object in self.HotkeyOrder do
 		local entry = self.HotkeyEntries[object]
 		if entry then
-			local want = object.Key ~= nil
+			local want = true
+			if self.HotkeyOnlyAssigned and not hotkeyAssigned(object) then want = false end
+			if self.HotkeyOnlyEnabled and not entry.IsOn() then want = false end
 			if want then
 				row += 1
 				local goal = Offset(1, HK_FIRST + HK_PITCH * (row - 1))
@@ -2517,8 +2528,14 @@ function Window:_layoutHotkeys()
 	end
 end
 
--- Every toggle with a keybind gets a permanent row: [switch | name | key . mode].
--- Hold / Toggle rows have an "Always" switch (feature forced on, key ignored). Press rows have a dot that flashes on each press.
+function Window:SetHotkeyFilter(onlyAssigned, onlyEnabled)
+	if onlyAssigned ~= nil then self.HotkeyOnlyAssigned = onlyAssigned == true end
+	if onlyEnabled ~= nil then self.HotkeyOnlyEnabled = onlyEnabled == true end
+	self:_layoutHotkeys()
+end
+
+-- Every bind gets a permanent row: [switch | name | key]. The switch mirrors the state of the feature.
+-- Press rows have a dot that flashes on each press.
 function Window:RegisterHotkey(object, toggle)
 	if self.HotkeyEntries[object] then return end
 	local entry = { Object = object, Toggle = toggle, Flash = false, Shown = false }
@@ -2528,6 +2545,7 @@ function Window:RegisterHotkey(object, toggle)
 		if toggle then return toggle.Value == true end
 		return object.State == true
 	end
+	entry.IsOn = isOn
 	local function usesSwitch() return object.Mode ~= "Press" end
 	local function isActive()
 		if object.Mode == "Press" then return entry.Flash end
@@ -2536,7 +2554,7 @@ function Window:RegisterHotkey(object, toggle)
 
 	-- Always switch
 	local track = new("Frame", {
-		Bg = function() return isOn() and Current.Accent or Current.Element end,
+		Bg = function() return isOn() and Current.Accent or Current.Inline end,
 		Position = Offset(11, 6), Size = Offset(Metrics.ToggleW - 2, Metrics.ToggleH - 2), Radius = FULL, Border = "Outline",
 	}, frame)
 	addGradient(track)
@@ -2557,6 +2575,11 @@ function Window:RegisterHotkey(object, toggle)
 	})
 	local chip, caption = makeChip(frame, "", false, 18)
 	chip.Position = Offset(0, 5)
+	-- The key chip takes its fill straight from the theme (Inline), no gradient and no extra tint.
+	for _, child in chip:GetChildren() do
+		if child:IsA("UIGradient") then child:Destroy() end
+	end
+	bind(chip, "BackgroundColor3", "Inline")
 	local chipW = 20
 
 	local function layout()
@@ -2574,7 +2597,7 @@ function Window:RegisterHotkey(object, toggle)
 		local x = isOn() and (Metrics.ToggleW - 2 - Metrics.ToggleKnob - 2) or 2
 		place(knob, "Position", Offset(x, 2), animated, "Knob")
 		local preset = animated and "Fast" or false
-		for _, inst in { track, knob, dot, text } do refresh(inst, preset) end
+		for _, inst in { track, knob, dot, text, chip } do refresh(inst, preset) end
 		layout()
 	end
 	function entry.Pulse()
@@ -3702,7 +3725,9 @@ function Window:BuildSettings(tab)
 	menuBind.OnKeyChanged = function() self.MenuKey = menuBind.Key end
 	local watermark = menu:Toggle({ Name = "Watermark", Default = true, NoSave = true, Gear = true, Callback = function(value) self:_fadeOverlay(self.Watermark, value) end })
 	watermark.Gear:Dropdown({ Name = "Show", Options = WatermarkOptions, Default = WatermarkDefaults, Multi = true, MaxRows = #WatermarkOptions, Callback = function(set) self:SetWatermarkItems(set) end })
-	menu:Toggle({ Name = "Hotkey List", Default = true, Callback = function(value) self:_fadeOverlay(self.Hotkeys, value) end })
+	local hotkeyList = menu:Toggle({ Name = "Hotkey List", Default = true, Gear = true, Callback = function(value) self:_fadeOverlay(self.Hotkeys, value) end })
+	hotkeyList.Gear:Toggle({ Name = "Only Assigned", Default = self.HotkeyOnlyAssigned, Callback = function(value) self:SetHotkeyFilter(value, nil) end })
+	hotkeyList.Gear:Toggle({ Name = "Only Enabled", Default = self.HotkeyOnlyEnabled, Callback = function(value) self:SetHotkeyFilter(nil, value) end })
 	local fontName = "Inter"
 	for name, family in Fonts do if family == FontFamily then fontName = name end end
 	menu:Dropdown({ Name = "Font", Options = FontOrder, Default = fontName, Callback = function(value) self:SetFont(value) end })
@@ -4101,6 +4126,7 @@ function Blossom.new(options)
 		Visible = true, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
+		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
 	}, Window)
 	ensureLoop()
 	LastWindow, Focus = win, win

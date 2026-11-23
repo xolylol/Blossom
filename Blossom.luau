@@ -1579,9 +1579,22 @@ function Section:Toggle(options)
 		value = value == true
 		if value == toggle.Value then return end
 		toggle.Value = value
+		-- Turning the feature off by hand also drops the forced "Always" state.
+		if not value and toggle.Always then toggle.Always = false end
 		render(true)
 		syncHotkey()
 		if not silent then fire(toggle.Callback, value) end
+	end
+
+	-- "Always" switch of the hotkey list: feature stays on, the key is ignored until it is switched off.
+	toggle.Always = false
+	function toggle:SetAlways(value)
+		value = value == true
+		if toggle.Always == value then return end
+		toggle.Always = value
+		if value then toggle:Set(true) else toggle:Set(false) end
+		toggle.Always = value
+		syncHotkey()
 	end
 
 	hoverable(hit, function()
@@ -1598,6 +1611,12 @@ function Section:Toggle(options)
 	if toggle.Keybind then
 		toggle.Keybind.OnPress = function()
 			local mode = toggle.Keybind.Mode
+			if mode == "Press" then
+				local entry = win.HotkeyEntries[toggle.Keybind]
+				if entry then entry.Pulse() end
+			elseif toggle.Always then
+				return
+			end
 			if mode == "Hold" then
 				toggle:Set(true)
 			elseif mode == "Press" then
@@ -1608,9 +1627,14 @@ function Section:Toggle(options)
 			end
 		end
 		toggle.Keybind.OnRelease = function()
-			if toggle.Keybind.Mode == "Hold" then toggle:Set(false) end
+			if toggle.Keybind.Mode == "Hold" and not toggle.Always then toggle:Set(false) end
 		end
 		toggle.Keybind.OnKeyChanged = syncHotkey
+		toggle.Keybind.OnModeChanged = function(mode)
+			if mode == "Press" and toggle.Always then toggle:SetAlways(false) end
+			syncHotkey()
+		end
+		win:RegisterHotkey(toggle.Keybind, toggle)
 	end
 	render(false)
 	syncHotkey()
@@ -2465,37 +2489,114 @@ function Window:SelectTab(tab, instant)
 	end
 end
 
+local HK_H, HK_FIRST, HK_PITCH, HK_NAME_X = 26, 33, 31, 46
+
+-- Re-sorts the visible rows. Rows without a key are hidden.
+function Window:_layoutHotkeys()
+	local row = 0
+	for _, object in self.HotkeyOrder do
+		local entry = self.HotkeyEntries[object]
+		if entry then
+			local want = object.Key ~= nil
+			if want then
+				row += 1
+				local goal = Offset(1, HK_FIRST + HK_PITCH * (row - 1))
+				if not entry.Shown then
+					entry.Frame.Position = Offset(-14, goal.Y.Offset)
+					entry.Frame.Visible = true
+				end
+				animate(entry.Frame, "Position", goal, "Settle")
+			elseif entry.Shown then
+				entry.Frame.Visible = false
+			end
+			entry.Shown = want
+		end
+	end
+end
+
+-- Every toggle with a keybind gets a permanent row: [switch | name | key . mode].
+-- Hold / Toggle rows have an "Always" switch (feature forced on, key ignored). Press rows have a dot that flashes on each press.
+function Window:RegisterHotkey(object, toggle)
+	if self.HotkeyEntries[object] then return end
+	local entry = { Object = object, Toggle = toggle, Flash = false, Shown = false }
+	local frame = new("Frame", { Bg = "Background", Size = Offset(140, HK_H), Radius = Metrics.FloatRadius, Border = "Outline", Visible = false }, self.Hotkeys)
+	entry.Frame = frame
+	local function isActive() return toggle and toggle.Value or entry.Flash end
+	local function usesSwitch() return toggle ~= nil and object.Mode ~= "Press" end
+
+	new("Frame", { Bg = function() return isActive() and Current.Accent or Current.Outline end, Position = Offset(1, 6), Size = Offset(2, 14), Radius = Metrics.SmallRadius }, frame).Name = "Bar"
+	local bar = frame.Bar
+
+	-- Always switch
+	local track = new("Frame", {
+		Bg = function() return toggle and toggle.Always and Current.Accent or Current.Element end,
+		Position = Offset(11, 6), Size = Offset(Metrics.ToggleW - 2, Metrics.ToggleH - 2), Radius = FULL, Border = "Outline",
+	}, frame)
+	addGradient(track)
+	local knob = new("Frame", {
+		Bg = function() return toggle and toggle.Always and Current.Text or Current.InactiveText end,
+		Size = Offset(Metrics.ToggleKnob, Metrics.ToggleKnob), Position = Offset(2, 2), Radius = FULL,
+	}, track)
+	local hit = new("TextButton", { Position = Offset(6, 0), Size = Offset(Metrics.ToggleW + 10, HK_H), ZIndex = 3 }, frame)
+
+	-- Press dot
+	local dot = new("Frame", {
+		Bg = function() return entry.Flash and Current.Accent or Current.InactiveText end,
+		Position = Offset(20, 9), Size = Offset(8, 8), Radius = FULL,
+	}, frame)
+
+	local text = label(frame, {
+		Text = object.Name or "Key", TextSize = 12, X = HK_NAME_X, RowH = HK_H, Weight = Enum.FontWeight.SemiBold,
+		Fg = function() return isActive() and Current.Text or Current.InactiveText end,
+	})
+	local chip, caption = makeChip(frame, "", false, 18)
+	chip.Position = Offset(0, 5)
+	local chipW = 20
+
+	local function layout()
+		local nameW = math.ceil(text.TextBounds.X)
+		chip.Position = Offset(HK_NAME_X + nameW + 8, 5)
+		frame.Size = Offset(HK_NAME_X + nameW + 8 + chipW + 10, HK_H)
+	end
+	fitChip(chip, caption, 20, function(width) chipW = width; layout() end)
+	text:GetPropertyChangedSignal("TextBounds"):Connect(layout)
+
+	function entry.Update(animated)
+		local sw = usesSwitch()
+		track.Visible, hit.Visible, dot.Visible = sw, sw, not sw
+		setText(caption, keyName(object.Key) .. " \u{00B7} " .. tostring(object.Mode))
+		local x = (toggle and toggle.Always) and (Metrics.ToggleW - 2 - Metrics.ToggleKnob - 2) or 2
+		place(knob, "Position", Offset(x, 2), animated, "Knob")
+		local preset = animated and "Fast" or false
+		for _, inst in { track, knob, dot, bar, text } do refresh(inst, preset) end
+		layout()
+	end
+	function entry.Pulse()
+		entry.Flash = true
+		entry.Update(true)
+		task.delay(0.18, function()
+			entry.Flash = false
+			if frame.Parent then entry.Update(true) end
+		end)
+	end
+
+	hit.MouseButton1Click:Connect(function()
+		if toggle and toggle.SetAlways then toggle:SetAlways(not toggle.Always) end
+	end)
+	hoverable(hit, function() track.BackgroundTransparency = 0.15 end, function() track.BackgroundTransparency = 0 end)
+
+	self.HotkeyEntries[object] = entry
+	table.insert(self.HotkeyOrder, object)
+	entry.Update(false)
+	self:_layoutHotkeys()
+end
+
+-- Kept for the old call sites: updates the highlight of an existing row.
 function Window:SetHotkeyActive(object, active)
 	local entry = self.HotkeyEntries[object]
-	local shouldShow = active and object.Key ~= nil
-	if shouldShow and not entry then
-		local frame = new("Frame", { Bg = "Background", Size = Offset(40, 24), Radius = Metrics.FloatRadius, Border = "Outline", Visible = false }, self.Hotkeys)
-		new("Frame", { Bg = "Accent", Position = Offset(1, 5), Size = Offset(2, 14), Radius = Metrics.SmallRadius }, frame)
-		local text = label(frame, { TextSize = 12, X = Metrics.Pad, RowH = 24, Weight = Enum.FontWeight.SemiBold })
-		entry = { Frame = frame, Label = text, Fader = newFader(frame) }
-		self.HotkeyEntries[object] = entry
-		table.insert(self.HotkeyOrder, object)
-		text:GetPropertyChangedSignal("TextBounds"):Connect(function()
-			frame.Size = Offset(math.ceil(text.TextBounds.X) + Metrics.Pad * 2, 24)
-		end)
-		setText(text, (object.Name or "Key") .. " - " .. keyName(object.Key))
-		frame.Size = Offset(math.ceil(text.TextBounds.X) + Metrics.Pad * 2, 24)
-		frame.Position = Offset(-14, 33 * #self.HotkeyOrder + 1)
-		entry.Fader:Show()
-	elseif entry and shouldShow then
-		setText(entry.Label, (object.Name or "Key") .. " - " .. keyName(object.Key))
-		return
-	elseif entry then
-		self.HotkeyEntries[object] = nil
-		table.remove(self.HotkeyOrder, table.find(self.HotkeyOrder, object))
-		animate(entry.Frame, "Position", Offset(-14, entry.Frame.Position.Y.Offset), "Smooth")
-		entry.Fader:Hide(function() entry.Frame:Destroy() end)
-	else
-		return
-	end
-	for index, key in self.HotkeyOrder do
-		animate(self.HotkeyEntries[key].Frame, "Position", Offset(1, 33 * index + 1), "Settle")
-	end
+	if not entry then return end
+	entry.Update(true)
+	self:_layoutHotkeys()
 end
 
 function Window:Notify(options)
@@ -3877,7 +3978,7 @@ end
 function Window:_buildHotkeys()
 	local holder = new("Frame", { Size = Offset(200, 300) }, self.Screen)
 	local head = new("Frame", { Bg = "Background", Position = Offset(1, 1), Size = Offset(88, 25), Radius = Metrics.FloatRadius, Border = "Outline", Active = true }, holder)
-	makeIcon(head, "key", 14, "Accent", "Background", { Position = Offset(9, 5) })
+	makeIcon(head, "keyboard", 14, "Accent", "Background", { Position = Offset(9, 5) })
 	local text = label(head, { Text = "Hotkeys", TextSize = 12, Weight = Enum.FontWeight.SemiBold, X = 31, RowH = 25 })
 	local function fit() head.Size = Offset(math.ceil(text.TextBounds.X) + 41, 25) end
 	text:GetPropertyChangedSignal("TextBounds"):Connect(fit)

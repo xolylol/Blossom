@@ -14,6 +14,8 @@
 	Elements: Toggle, Slider, RangeSlider, Dropdown, Colorpicker, Keybind, Button,
 	          Textbox, Label, Divider, Listbox.
 	Toggle and Label also accept Keybind = and Color = for inline controls.
+	Preview:    local view = Section:Preview({ Height = 72 }) - an empty framed canvas (clips its children): parent your own instances to view.Frame.
+	            view:SetHeight(h), view:IsShown() (false while its tab/window is hidden, so animation loops can sleep).
 	Every element returns an object with .Value and :Set(value, silent).
 
 	Confirm:    Section:Button({ Name = "Unload", Confirm = true, Callback = ... }) - first click turns the label into "Are you sure?".
@@ -2194,6 +2196,27 @@ function Section:Listbox(options)
 
 	listbox:SetOptions(options.Options or {})
 	return listbox
+end
+
+-- Preview: an empty framed canvas inside a section. It draws nothing itself: parent your own instances to object.Frame
+-- (it clips them). Not searchable, not saved in configs. Same well as Listbox, so it matches the other elements.
+function Section:Preview(options)
+	options = options or {}
+	local section, height = self, options.Height or 72
+	local item = self:_item(height, "Preview", nil, false)
+	local frame = new("Frame", {
+		Bg = "Inline", Position = Offset(1, 1), Size = Dim2(1, -2, 0, height - 2), Radius = Metrics.Radius, Border = "Outline",
+		ClipsDescendants = true,
+	}, item.Frame)
+	local object = { Item = item, Instance = frame, Frame = frame }
+	function object:SetHeight(value)
+		item.Height = value
+		item.Frame.Size = Dim2(1, 0, 0, value)
+		frame.Size = Dim2(1, -2, 0, value - 2)
+		section:Layout(true)
+	end
+	function object:IsShown() return isShown(frame) end
+	return object
 end
 
 function Section:_beginDrag()

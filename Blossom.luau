@@ -2554,7 +2554,7 @@ function Window:RegisterHotkey(object, toggle)
 
 	-- Always switch
 	local track = new("Frame", {
-		Bg = function() return isOn() and Current.Accent or Current.Inline end,
+		Bg = function() return isOn() and Current.Accent or Current.Element end,
 		Position = Offset(11, 6), Size = Offset(Metrics.ToggleW - 2, Metrics.ToggleH - 2), Radius = FULL, Border = "Outline",
 	}, frame)
 	addGradient(track)
@@ -2565,7 +2565,7 @@ function Window:RegisterHotkey(object, toggle)
 
 	-- Press dot
 	local dot = new("Frame", {
-		Bg = function() return entry.Flash and Current.Accent or Current.InactiveText end,
+		Bg = function() return entry.Flash and Current.Accent or Current.Element end,
 		Position = Offset(20, 9), Size = Offset(8, 8), Radius = FULL,
 	}, frame)
 
@@ -2580,6 +2580,8 @@ function Window:RegisterHotkey(object, toggle)
 		if child:IsA("UIGradient") then child:Destroy() end
 	end
 	bind(chip, "BackgroundColor3", "Inline")
+	local chipStroke = chip:FindFirstChildOfClass("UIStroke")
+	if chipStroke then bind(chipStroke, "Color", "Inline") end
 	local chipW = 20
 
 	local function layout()
@@ -2597,7 +2599,7 @@ function Window:RegisterHotkey(object, toggle)
 		local x = isOn() and (Metrics.ToggleW - 2 - Metrics.ToggleKnob - 2) or 2
 		place(knob, "Position", Offset(x, 2), animated, "Knob")
 		local preset = animated and "Fast" or false
-		for _, inst in { track, knob, dot, text, chip } do refresh(inst, preset) end
+		for _, inst in { track, knob, dot, text, chip, chipStroke } do refresh(inst, preset) end
 		layout()
 	end
 	function entry.Pulse()
@@ -4011,6 +4013,17 @@ function Window:_buildWatermark(options)
 	layout()
 	self.WatermarkLayout = layout
 	self:_makeDraggable(frame, frame)
+	-- A click on the watermark (not a drag) opens / closes the window.
+	local pressAt
+	frame.InputBegan:Connect(function(input)
+		if isClick(input) then pressAt = mousePos() end
+	end)
+	frame.InputEnded:Connect(function(input)
+		if not isClick(input) or not pressAt then return end
+		local moved = (mousePos() - pressAt).Magnitude
+		pressAt = nil
+		if moved < 4 then self:Toggle() end
+	end)
 end
 
 function Window:_buildHotkeys()

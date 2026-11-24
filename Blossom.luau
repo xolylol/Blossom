@@ -745,6 +745,7 @@ end
 
 function sweepHover()
 	if next(HoverSet) == nil then return end
+	if Focus and Focus.Moving then return end
 	local point = mousePos()
 	for inst, leave in HoverSet do
 		if not inside(inst, point) or not isShown(inst) or covered(inst, point) then leave() end
@@ -2948,7 +2949,11 @@ function Window:_makeDraggable(handle, target, allowed)
 			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
-			animate(target, "Position", self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y), "Follow")
+			-- Set directly (no spring): the window sticks to the pointer instead of trailing behind it.
+			self.Moving = true
+			snap(target, "Position", self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y))
+		end, function()
+			self.Moving = false
 		end)
 	end)
 end
@@ -4276,7 +4281,7 @@ function Blossom.new(options)
 	local function perFrame(dt)
 		win:_flushThemeColors(dt)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
-		if win.CurrentTab then
+		if win.CurrentTab and not win.Moving then
 			for _, column in win:Cols() do
 				local y = column.Scroll.CanvasPosition.Y
 				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1

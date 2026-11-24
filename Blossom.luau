@@ -2841,10 +2841,8 @@ function Window:OpenPicker(swatch, color)
 	self:_openPopup(picker, swatch, Vec2(p.X - 8, p.Y + s.Y + Metrics.Pad))
 end
 
-function Window:_clamped(target, x, y, screen, size)
-	-- screen / size can be passed in (a drag measures them once), AbsoluteSize reads force a layout pass.
-	screen, size = screen or self.Screen.AbsoluteSize, size or target.AbsoluteSize
-	local anchor = target.AnchorPoint
+function Window:_clamped(target, x, y)
+	local screen, size, anchor = self.Screen.AbsoluteSize, target.AbsoluteSize, target.AnchorPoint
 	local keep = math.min(60, size.X)
 	local left = math.clamp(x - anchor.X * size.X, keep - size.X, math.max(keep - size.X, screen.X - keep))
 	local top = math.clamp(y - anchor.Y * size.Y, 0, math.max(0, screen.Y - 30))
@@ -2988,31 +2986,20 @@ function Window:_buildResize()
 	handle("ResizeCorner", Dim2(1, 3, 1, 3), Offset(18, 18), Vec2(1, 1), 1, 1)
 end
 
--- While the window is dragged its glow (five big see-through layers) is hidden, which removes most of the overdraw.
-function Window:_setMoving(moving, target)
-	if self.Moving == moving then return end
-	self.Moving = moving
-	if target == self.Holder and type(self.Glow) == "table" then
-		for _, layer in self.Glow do layer.Visible = not moving end
-	end
-end
-
 function Window:_makeDraggable(handle, target, allowed)
 	handle.InputBegan:Connect(function(input)
 		if not isClick(input) then return end
 		local start, origin = mousePos(), target.Position
 		if allowed and not allowed(start) then return end
-		-- Sizes cannot change while dragging, so they are measured once instead of every frame.
-		local screenSize, targetSize = self.Screen.AbsoluteSize, target.AbsoluteSize
 		beginDrag(function(point)
 			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
 			-- Set directly (no spring): the window sticks to the pointer instead of trailing behind it.
-			self:_setMoving(true, target)
-			snap(target, "Position", self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y, screenSize, targetSize))
+			self.Moving = true
+			snap(target, "Position", self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y))
 		end, function()
-			self:_setMoving(false, target)
+			self.Moving = false
 		end)
 	end)
 end
@@ -4221,7 +4208,7 @@ function Blossom.new(options)
 	win.Holder = holder
 	win:_registerScale(holder)
 	local root = new("Frame", { Bg = "Background", Active = true, Size = Dim2(1, 0, 1, 0), Radius = Metrics.WindowRadius, Border = "Outline" }, holder)
-	win.Glow = addShadow(root, "Large")
+	addShadow(root, "Large")
 	win.Root = root
 	win.Fader = newFader(holder)
 	-- A Modal button frees the cursor from first-person camera lock while the menu is open.

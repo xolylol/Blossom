@@ -1464,11 +1464,14 @@ Gear.__index = Gear
 
 function Gear:Layout()
 	local y, any = Metrics.Pad, false
-	for _, item in self.Items do
-		if item.Visible ~= false then
-			item.Y, any = y, true
-			item.Frame.Position = Offset(0, y)
-			y += item.Height + Metrics.Gap
+	-- items flagged Last (the reset button) always sit at the bottom, whatever order they were created in
+	for pass = 1, 2 do
+		for _, item in self.Items do
+			if item.Visible ~= false and (item.Last == true) == (pass == 2) then
+				item.Y, any = y, true
+				item.Frame.Position = Offset(0, y)
+				y += item.Height + Metrics.Gap
+			end
 		end
 	end
 	local height = any and y - Metrics.Gap + Metrics.Pad or Metrics.Pad * 2
@@ -1484,6 +1487,45 @@ function Gear:_item(height, kind, name)
 	return item
 end
 
+-- Every control made inside a gear remembers its starting value, so Gear:ResetButton() can put them all back.
+local TRACKED_KINDS = { "Toggle", "Slider", "RangeSlider", "Dropdown", "Colorpicker", "Textbox", "Listbox" }
+
+local function trackGear(gear)
+	gear.Tracked = {}
+	for _, kind in TRACKED_KINDS do
+		local make = Section[kind]
+		if make then
+			gear[kind] = function(self, options)
+				local object = make(self, options)
+				if type(object) == "table" then
+					local value = object.Value
+					if type(value) == "table" then value = table.clone(value) end
+					table.insert(self.Tracked, { Object = object, Value = value, Alpha = object.Alpha })
+				end
+				return object
+			end
+		end
+	end
+end
+
+function Gear:ResetButton(name)
+	local button = self:Button({
+		Name = name or "Reset to Default",
+		Callback = function()
+			for _, entry in self.Tracked do
+				local object, value = entry.Object, entry.Value
+				if type(value) == "table" then value = table.clone(value) end
+				pcall(function()
+					if entry.Alpha ~= nil then object:Set(value, entry.Alpha) else object:Set(value) end
+				end)
+			end
+		end,
+	})
+	local item = self.Items[#self.Items]
+	if item then item.Last = true; self:Layout() end
+	return button
+end
+
 local function attachGear(section, item, name)
 	local win = section.Window
 	local frame, body, controls = win:_popupFrame(win.ColumnW, Metrics.Pad * 2)
@@ -1492,6 +1534,7 @@ local function attachGear(section, item, name)
 		Window = win, Tab = section.Tab, Name = section.Name .. "/" .. tostring(name), Popup = popup, Items = {}, Controls = controls,
 		Body = new("Frame", { Position = Offset(Metrics.Pad, 0), Size = Dim2(1, -Metrics.Pad * 2, 1, 0) }, body),
 	}, Gear)
+	trackGear(gear)
 	table.insert(win.Extras, gear)
 	table.insert(win.ResizeJobs, function() gear:Layout() end)
 	local button = new("TextButton", { Size = Offset(Metrics.Row, Metrics.Row) }, item.Frame)
@@ -1518,7 +1561,10 @@ local function addInlineControls(section, item, options, name)
 	if options.Keybind ~= nil then
 		keybind = attachKeybind(section, item, { Key = options.Keybind, Mode = options.KeybindMode, Modes = options.KeybindModes, Name = options.KeybindName or name })
 	end
-	if options.Gear then gear = attachGear(section, item, options.Name or name) end
+	if options.Gear then
+		gear = attachGear(section, item, options.Name or name)
+		if options.Reset then gear:ResetButton() end
+	end
 	return keybind, color, gear
 end
 

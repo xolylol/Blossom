@@ -768,6 +768,8 @@ end
 function Fader:_apply(alpha)
 	local entries = self.Entries
 	if not entries then return end
+	if #entries > 300 and alpha > 0 and alpha < 1 and self.Last and abs(alpha - self.Last) < 0.05 then return end
+	self.Last = alpha
 	for _, e in entries do
 		e[1][e[2]] = 1 - (1 - e[3]) * alpha
 	end
@@ -1429,8 +1431,13 @@ local function attachColor(section, item, options)
 			v *= 0.55 + 0.45 * (0.5 + 0.5 * math.cos(color.Phase * 2.2))
 		end
 		color.Animating = true
-		color:Set(Color3.fromHSV(h, s, v))
+		color:Set(Color3.fromHSV(h, s, v), nil, true)
 		color.Animating = false
+		color.FireClock = (color.FireClock or 0) + dt
+		if color.FireClock >= 1 / 20 then
+			color.FireClock = 0
+			fire(color.Callback, color.Value, color.Alpha)
+		end
 	end
 	swatch.MouseButton1Click:Connect(function() win:OpenPicker(swatch, color) end)
 	table.insert(win.Colors, color)
@@ -2639,7 +2646,7 @@ function Window:RegisterHotkey(object, toggle)
 
 	-- Follows key / mode / state changes of the bind by itself, whoever changes them.
 	local lastKey, lastMode, lastOn = object.Key, object.Mode, isOn()
-	table.insert(self.Connections, RunService.Heartbeat:Connect(function()
+	local function poll()
 		if not frame.Parent then return end
 		local on = isOn()
 		if object.Key ~= lastKey or object.Mode ~= lastMode or on ~= lastOn then
@@ -2647,7 +2654,19 @@ function Window:RegisterHotkey(object, toggle)
 			entry.Update(true)
 			self:_layoutHotkeys()
 		end
-	end))
+	end
+	self.HotkeyPolls = self.HotkeyPolls or {}
+	table.insert(self.HotkeyPolls, poll)
+	if not self.HotkeyPollConnection then
+		local accumulated = 0
+		self.HotkeyPollConnection = RunService.Heartbeat:Connect(function(dt)
+			accumulated += dt
+			if accumulated < 1 / 15 then return end
+			accumulated = 0
+			for _, step in self.HotkeyPolls do step() end
+		end)
+		table.insert(self.Connections, self.HotkeyPollConnection)
+	end
 
 	self.HotkeyEntries[object] = entry
 	table.insert(self.HotkeyOrder, object)
@@ -4306,7 +4325,7 @@ function Blossom.new(options)
 	local function perFrame(dt)
 		win:_flushThemeColors(dt)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
-		if win.CurrentTab and not win.Moving then
+		if win.CurrentTab and win.Visible and not win.Moving then
 			for _, column in win:Cols() do
 				local y = column.Scroll.CanvasPosition.Y
 				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1

@@ -605,7 +605,9 @@ local ShadowsAvailable = pcall(function() Instance.new("UIShadow"):Destroy() end
 
 -- The window glow is stacked soft frames behind the window, not a live UIShadow: a blurred UIShadow is
 -- re-rendered every frame while the window moves, which is what dropped FPS during dragging.
-local GlowLayers = 5
+local GlowLayers = 2
+local GlowStep = 5          -- px each layer grows (was 5 layers x 2px; 2 wider layers cover the same ~10px glow)
+local GlowTransparency = 0.88
 
 local function addGlow(inst)
 	local parent = inst.Parent
@@ -614,9 +616,9 @@ local function addGlow(inst)
 	local radius = corner and corner.CornerRadius.Offset or 0
 	local layers = {}
 	for index = GlowLayers, 1, -1 do
-		local grow = index * 2
+		local grow = index * GlowStep
 		local layer = new("Frame", {
-			Name = "Glow", Bg = "Shadow", BackgroundTransparency = 0.93, Radius = radius + grow,
+			Name = "Glow", Bg = "Shadow", BackgroundTransparency = GlowTransparency, Radius = radius + grow,
 			Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2), ZIndex = inst.ZIndex - 1,
 		}, parent)
 		layer.Active = false

@@ -603,32 +603,9 @@ local Shadows = {
 -- UIShadow is still rolling out, so clients without it simply draw no shadow.
 local ShadowsAvailable = pcall(function() Instance.new("UIShadow"):Destroy() end)
 
--- The window glow is stacked soft frames behind the window, not a live UIShadow: a blurred UIShadow is
--- re-rendered every frame while the window moves, which is what dropped FPS during dragging.
-local GlowLayers = 2
-local GlowStep = 5          -- px each layer grows (was 5 layers x 2px; 2 wider layers cover the same ~10px glow)
-local GlowTransparency = 0.88
-
-local function addGlow(inst)
-	local parent = inst.Parent
-	if not parent then return nil end
-	local corner = inst:FindFirstChildOfClass("UICorner")
-	local radius = corner and corner.CornerRadius.Offset or 0
-	local layers = {}
-	for index = GlowLayers, 1, -1 do
-		local grow = index * GlowStep
-		local layer = new("Frame", {
-			Name = "Glow", Bg = "Shadow", BackgroundTransparency = GlowTransparency, Radius = radius + grow,
-			Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2), ZIndex = inst.ZIndex - 1,
-		}, parent)
-		layer.Active = false
-		table.insert(layers, layer)
-	end
-	return layers
-end
-
 local function addShadow(inst, style)
-	if style == "Large" then return addGlow(inst) end
+	-- Window/popup glow removed: fewer frames, nothing extra to draw while dragging.
+	if style == "Large" then return nil end
 	if not ShadowsAvailable then return nil end
 	local preset = Shadows[style]
 	local shadow = Instance.new("UIShadow")
